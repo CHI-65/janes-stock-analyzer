@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Two Sides — live data test</title>
+<style>
+  :root{
+    --sky:#CDEBF5; --skyDeep:#8FD0E8; --sand:#F6E7C9; --sandDeep:#EBD3A3;
+    --ocean:#0E7490; --oceanDark:#155E75; --ink:#1F3A44;
+    --coral:#E36650; --coralDark:#C24B37; --palm:#1E8A5E; --gold:#D9A400; --red:#C62828; --white:#fff;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; min-height:100vh; color:var(--ink);
+    font-family:-apple-system,"Helvetica Neue",Arial,sans-serif;
+    background:linear-gradient(180deg,var(--sky) 0%,var(--sand) 60%,var(--sandDeep) 100%);
+    padding:24px 16px 60px;
+  }
+  .wrap{max-width:640px;margin:0 auto;}
+  h1{font-family:Georgia,serif;font-weight:800;color:var(--oceanDark);font-size:clamp(26px,6vw,34px);margin:0 0 6px;}
+  .sub{font-size:15px;color:var(--ink);opacity:.85;line-height:1.5;margin:0 0 22px;}
+  h2{font-family:Georgia,serif;color:var(--oceanDark);font-size:19px;margin:26px 0 10px;}
+  .card{background:rgba(255,255,255,.88);border-radius:16px;padding:16px 18px;box-shadow:0 8px 24px rgba(21,94,117,.14);}
+  .big{font-family:Georgia,serif;font-weight:800;font-size:30px;color:var(--oceanDark);line-height:1;}
+  .muted{font-size:13px;opacity:.7;}
+  .up{color:var(--palm);font-weight:700;}
+  .down{color:var(--red);font-weight:700;}
+  .row{display:flex;align-items:center;gap:14px;padding:12px 14px;background:rgba(255,255,255,.9);border:1.5px solid rgba(14,116,144,.2);border-radius:14px;margin-bottom:9px;}
+  .logo{width:40px;height:40px;border-radius:10px;background:#fff;border:1px solid rgba(0,0,0,.08);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;font-family:Georgia,serif;font-weight:800;color:var(--oceanDark);}
+  .logo img{width:100%;height:100%;object-fit:contain;}
+  .nm{flex:1;min-width:0;}
+  .nm b{font-family:Georgia,serif;color:var(--oceanDark);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .nm span{font-size:12px;opacity:.65;font-weight:600;}
+  .px{text-align:right;flex-shrink:0;}
+  .px b{font-family:Georgia,serif;font-size:16px;}
+  .ok{color:var(--palm);font-weight:700;}
+  .err{color:var(--coralDark);}
+  .stamp{font-size:12px;opacity:.6;margin-top:20px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🏖️ Two Sides — live data test</h1>
+  <p class="sub">This is a normal web page (no Claude sandbox), pulling <b>real numbers straight from your Finnhub&nbsp;+&nbsp;MarketData server</b>. If the numbers below fill in, the thing that failed inside the artifact works perfectly out here.</p>
+
+  <h2>Live quote</h2>
+  <div id="quote" class="card">Loading Apple…</div>
+
+  <h2>Watchlist (Finnhub)</h2>
+  <div id="watchlist"><div class="card">Loading watchlist…</div></div>
+
+  <h2>Max pain (MarketData)</h2>
+  <div id="maxpain" class="card">Loading AAPL max pain…</div>
+
+  <p id="stamp" class="stamp"></p>
+</div>
+
+<script>
+  var PROXY = "https://two-sides-proxy.calharrisinc.workers.dev";
+  var WATCH = ["MU","MSTR","TSLA","NVTS","AAPL","SPCX","ABAT"];
+
+  function j(url){ return fetch(url).then(function(r){ return r.json(); }); }
+  function pct(n){ if(typeof n!=="number") return ""; return (n>=0?"+":"")+n.toFixed(2)+"%"; }
+
+  // Live quote
+  j(PROXY + "/quote?ticker=AAPL").then(function(q){
+    var up = q.change >= 0;
+    document.getElementById("quote").innerHTML =
+      '<div class="big">$'+q.price.toFixed(2)+'</div>'+
+      '<div class="'+(up?"up":"down")+'">'+(up?"▲":"▼")+' '+pct(q.changePct)+'</div>'+
+      '<div class="muted">Apple Inc · as of '+(q.asOf||"—")+'</div>';
+  }).catch(function(e){
+    document.getElementById("quote").innerHTML = '<span class="err">Quote error: '+e+'</span>';
+  });
+
+  // Watchlist
+  j(PROXY + "/cards?tickers=" + WATCH.join(",")).then(function(res){
+    var cards = (res && res.cards) || [];
+    var html = "";
+    cards.forEach(function(c){
+      var up = typeof c.changePct==="number" ? c.changePct>=0 : (c.change>=0);
+      var logo = c.logo ? '<img src="'+c.logo+'" alt="">' : (c.ticker||"?").slice(0,1);
+      var price = typeof c.price==="number" ? '<b>$'+c.price.toFixed(2)+'</b>' : '<b>—</b>';
+      var chg = typeof c.changePct==="number" ? '<div class="'+(up?"up":"down")+'">'+(up?"▲":"▼")+' '+pct(c.changePct)+'</div>' : '';
+      html += '<div class="row"><div class="logo">'+logo+'</div>'+
+              '<div class="nm"><b>'+(c.name||c.ticker)+'</b><span>'+c.ticker+'</span></div>'+
+              '<div class="px">'+price+chg+'</div></div>';
+    });
+    document.getElementById("watchlist").innerHTML = html || '<div class="card err">No cards returned.</div>';
+  }).catch(function(e){
+    document.getElementById("watchlist").innerHTML = '<div class="card err">Watchlist error: '+e+'</div>';
+  });
+
+  // Max pain
+  j(PROXY + "/maxpain?ticker=AAPL").then(function(m){
+    if(typeof m.maxPain!=="number") throw new Error(m.error||"no data");
+    document.getElementById("maxpain").innerHTML =
+      '<div class="big">$'+m.maxPain+'</div>'+
+      '<div class="muted">AAPL · vs. spot $'+(m.spot!=null?m.spot.toFixed(2):"—")+' · '+(m.expiration||"")+
+      ' · '+(m.strikesConsidered||"?")+' strikes</div>';
+  }).catch(function(e){
+    document.getElementById("maxpain").innerHTML = '<span class="err">Max pain error: '+e+'</span>';
+  });
+
+  document.getElementById("stamp").textContent = "Data server: " + PROXY;
+</script>
+</body>
+</html>
