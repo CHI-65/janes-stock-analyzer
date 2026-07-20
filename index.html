@@ -1,52 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Two Sides</title>
-  <script>
-      var APP_URL = "https://claude.ai/public/artifacts/e6e8991c-e140-40a1-a035-7af1916a6abe";    if (APP_URL.indexOf("http") === 0) {
-      window.location.replace(APP_URL);
-    }
-  </script>
-  <style>
-    body {
-      font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
-      background: linear-gradient(180deg, #CDEBF5 0%, #F6E7C9 100%);
-      color: #1F3A44;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      margin: 0;
-      text-align: center;
-      padding: 24px;
-    }
-    .card {
-      background: rgba(255,255,255,0.85);
-      border-radius: 18px;
-      padding: 28px 26px;
-      max-width: 420px;
-      box-shadow: 0 10px 30px rgba(21,94,117,0.25);
-    }
-    a { color: #0E7490; font-weight: 700; }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Two Sides</title>
+<meta http-equiv="refresh" content="0; url=app.html" />
+<script>window.location.replace("app.html");</script>
+<style>body{font-family:-apple-system,"Helvetica Neue",Arial,sans-serif;background:linear-gradient(180deg,#CDEBF5,#F6E7C9);color:#1F3A44;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center;padding:24px}a{color:#0E7490;font-weight:700}</style>
 </head>
 <body>
-  <div class="card">
-    <h1>🏖️ Two Sides</h1>
-    <p id="msg">Taking you to the app…</p>
-    <p><a id="lnk" href="#">Tap here if nothing happens</a></p>
-  </div>
-  <script>
-    var lnk = document.getElementById("lnk");
-    if (APP_URL.indexOf("http") === 0) {
-      lnk.href = APP_URL;
-    } else {
-      document.getElementById("msg").textContent =
-        "Setup note: the app link hasn't been pasted into index.html yet.";
-      lnk.style.display = "none";
-    }
-  </script>
+<p>Taking you to Two Sides… <a href="app.html">tap here if it doesn’t load</a>.</p>
 </body>
 </html>
