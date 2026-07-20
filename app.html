@@ -1,0 +1,2271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#CDEBF5" />
+<title>Two Sides</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #CDEBF5; }
+  #root { min-height: 100vh; }
+  * { -webkit-tap-highlight-color: transparent; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- React 18 (global React / ReactDOM) -->
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+
+<!-- Persistent storage shim: the app was built for the artifact runtime's
+     window.storage; here we back it with the browser's localStorage so the
+     welcome photo, gallery, and watchlist are remembered between visits. -->
+<script>
+  (function () {
+    var mem = {};
+    var ok = false;
+    try { localStorage.setItem("__t", "1"); localStorage.removeItem("__t"); ok = true; } catch (e) { ok = false; }
+    function key(k) { return "twosides:" + k; }
+    window.storage = {
+      get: function (k) {
+        try { return Promise.resolve(ok ? localStorage.getItem(key(k)) : (mem[k] || null)); }
+        catch (e) { return Promise.resolve(mem[k] || null); }
+      },
+      set: function (k, v) {
+        try { if (ok) localStorage.setItem(key(k), v); else mem[k] = v; }
+        catch (e) { mem[k] = v; }
+        return Promise.resolve();
+      },
+      delete: function (k) {
+        try { if (ok) localStorage.removeItem(key(k)); else delete mem[k]; }
+        catch (e) { delete mem[k]; }
+        return Promise.resolve();
+      },
+    };
+  })();
+</script>
+
+<!-- The app (pre-transpiled from JSX) -->
+<script>
+const { useState, useRef, useEffect } = React;
+const DEFAULT_PHOTO = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4MDAiIGhlaWdodD0iODAwIiB2aWV3Qm94PSIwIDAgODAwIDgwMCI+CjxkZWZzPgo8bGluZWFyR3JhZGllbnQgaWQ9InNreSIgeDE9IjAiIHkxPSIwIiB4Mj0iMCIgeTI9IjEiPgo8c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNCRkU5RjciLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNFQUY3RkIiLz4KPC9saW5lYXJHcmFkaWVudD4KPGxpbmVhckdyYWRpZW50IGlkPSJzZWEiIHgxPSIwIiB5MT0iMCIgeDI9IjAiIHkyPSIxIj4KPHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjM0ZiM2Q0Ii8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjMUU4RkIwIi8+CjwvbGluZWFyR3JhZGllbnQ+CjxsaW5lYXJHcmFkaWVudCBpZD0ic2FuZCIgeDE9IjAiIHkxPSIwIiB4Mj0iMCIgeTI9IjEiPgo8c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNGM0UyQkMiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNFN0NFOTUiLz4KPC9saW5lYXJHcmFkaWVudD4KPC9kZWZzPgo8cmVjdCB3aWR0aD0iODAwIiBoZWlnaHQ9IjQ3MCIgZmlsbD0idXJsKCNza3kpIi8+CjxjaXJjbGUgY3g9IjYxMCIgY3k9IjE1MCIgcj0iNzAiIGZpbGw9IiNGRkRENzMiLz4KPHJlY3QgeT0iNDMwIiB3aWR0aD0iODAwIiBoZWlnaHQ9IjE0MCIgZmlsbD0idXJsKCNzZWEpIi8+CjxyZWN0IHk9IjU2MCIgd2lkdGg9IjgwMCIgaGVpZ2h0PSIyNDAiIGZpbGw9InVybCgjc2FuZCkiLz4KPHBhdGggZD0iTTAgNDcwIHEgMTAwIC0xOCAyMDAgMCB0IDIwMCAwIHQgMjAwIDAgdCAyMDAgMCB2IDMwIEgwIFoiIGZpbGw9IiNFQUY3RkIiIG9wYWNpdHk9IjAuNSIvPgo8L3N2Zz4=";
+const PROXY = "https://two-sides-proxy.calharrisinc.workers.dev";
+const LOADING_LINES = [
+  "Pulling recent news and price action\u2026",
+  "Building the bull case\u2026",
+  "Stress-testing it with the bear case\u2026",
+  "Weighing both sides\u2026"
+];
+const FONTS = `
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700;9..144,900&family=Outfit:wght@400;500;600;700&display=swap');
+
+/* \u2014\u2014\u2014 iPhone / iPad polish \u2014\u2014\u2014 */
+* { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+button, input { touch-action: manipulation; }
+button { min-height: 44px; } /* Apple's minimum comfortable tap target */
+.screen {
+  min-height: 100vh;
+  min-height: 100dvh; /* iOS Safari: tracks the real visible area as the toolbar collapses */
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
+}
+.screen-welcome { padding-bottom: max(32px, env(safe-area-inset-bottom)); }
+.screen-analyzer { padding-bottom: calc(60px + env(safe-area-inset-bottom)); }
+@media (max-width: 640px) {
+  .case-card { flex-basis: 100% !important; } /* stack bull/bear cards on iPhone */
+}
+`;
+const palette = {
+  sky: "#CDEBF5",
+  skyDeep: "#8FD0E8",
+  sand: "#F6E7C9",
+  sandDeep: "#EBD3A3",
+  ocean: "#0E7490",
+  oceanDark: "#155E75",
+  ink: "#1F3A44",
+  coral: "#E36650",
+  coralDark: "#C24B37",
+  palm: "#1E8A5E",
+  red: "#C62828",
+  white: "#FFFFFF"
+};
+const BILL_IMAGES = [
+  "data:image/webp;base64,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"
+];
+function PhotoRain() {
+  const pieces = Array.from({ length: 14 }, (_, i) => {
+    const img = BILL_IMAGES[i % BILL_IMAGES.length];
+    const left = Math.random() * 94;
+    const delay = Math.random() * 6;
+    const duration = 6 + Math.random() * 5;
+    const size = 48 + Math.random() * 30;
+    const drift = -24 + Math.random() * 48;
+    const tilt = -18 + Math.random() * 36;
+    const flip = Math.random() > 0.5 ? -1 : 1;
+    const flutter = 1.9 + Math.random() * 2.2;
+    return { img, left, delay, duration, size, drift, tilt, flip, flutter, key: i };
+  });
+  return /* @__PURE__ */ React.createElement("div", { "aria-hidden": "true", style: { position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", zIndex: 2, perspective: "500px" } }, pieces.map((p) => /* @__PURE__ */ React.createElement(
+    "span",
+    {
+      key: p.key,
+      style: {
+        position: "absolute",
+        top: "-130px",
+        left: `${p.left}%`,
+        lineHeight: 0,
+        filter: "drop-shadow(0 3px 4px rgba(0,0,0,0.25))",
+        animation: `rainFallPhoto ${p.duration}s linear ${p.delay}s infinite`,
+        "--drift": `${p.drift}px`,
+        "--tilt": `${p.tilt}deg`
+      }
+    },
+    /* @__PURE__ */ React.createElement(
+      "img",
+      {
+        src: p.img,
+        alt: "",
+        style: {
+          width: p.size,
+          display: "block",
+          animation: `billFlex ${p.flutter}s ease-in-out ${p.delay}s infinite alternate`,
+          "--flip": p.flip
+        }
+      }
+    )
+  )));
+}
+function signedScore(value) {
+  const pct = Math.max(0, Math.min(100, value));
+  return Math.round(pct) - 50;
+}
+function signedLabel(score) {
+  return score > 0 ? "+" + score : String(score);
+}
+function signedColor(score) {
+  return score > 0 ? palette.palm : score < 0 ? palette.red : palette.ink;
+}
+function TensionBar({ value }) {
+  const pct = Math.max(0, Math.min(100, value));
+  return /* @__PURE__ */ React.createElement("div", { style: { margin: "8px 0 4px" } }, /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      style: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "flex-end",
+        fontFamily: "'Outfit', sans-serif",
+        fontSize: 13,
+        fontWeight: 600,
+        color: palette.ink,
+        marginBottom: 6
+      }
+    },
+    /* @__PURE__ */ React.createElement("span", { style: { flex: 1, textAlign: "left", color: palette.coralDark } }, "Reasons to worry"),
+    /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        style: {
+          fontFamily: "'Fraunces', serif",
+          fontWeight: 900,
+          fontSize: 22,
+          lineHeight: 1,
+          color: signedColor(signedScore(value))
+        }
+      },
+      signedLabel(signedScore(value))
+    ),
+    /* @__PURE__ */ React.createElement("span", { style: { flex: 1, textAlign: "right", color: palette.palm } }, "Reasons to be hopeful")
+  ), /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      style: {
+        height: 14,
+        borderRadius: 999,
+        background: `linear-gradient(90deg, ${palette.coral}, ${palette.sandDeep} 50%, ${palette.palm})`,
+        position: "relative",
+        boxShadow: "inset 0 1px 3px rgba(0,0,0,0.15)"
+      }
+    },
+    /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        style: {
+          position: "absolute",
+          top: -5,
+          left: `calc(${pct}% - 12px)`,
+          width: 24,
+          height: 24,
+          borderRadius: "50%",
+          background: palette.white,
+          border: `3px solid ${palette.ink}`,
+          boxShadow: "0 2px 6px rgba(0,0,0,0.25)",
+          transition: "left 0.8s cubic-bezier(.2,.8,.2,1)"
+        }
+      }
+    )
+  ));
+}
+function OptionsBar({ value }) {
+  const pct = Math.max(0, Math.min(100, value));
+  return /* @__PURE__ */ React.createElement("div", { style: { margin: "8px 0 4px" } }, /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      style: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "flex-end",
+        fontFamily: "'Outfit', sans-serif",
+        fontSize: 13,
+        fontWeight: 600,
+        color: palette.ink,
+        marginBottom: 6
+      }
+    },
+    /* @__PURE__ */ React.createElement("span", { style: { flex: 1, textAlign: "left", color: palette.coralDark } }, "Put-heavy (bracing for a drop)"),
+    /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        style: {
+          fontFamily: "'Fraunces', serif",
+          fontWeight: 900,
+          fontSize: 22,
+          lineHeight: 1,
+          color: signedColor(signedScore(value))
+        }
+      },
+      signedLabel(signedScore(value))
+    ),
+    /* @__PURE__ */ React.createElement("span", { style: { flex: 1, textAlign: "right", color: palette.palm } }, "Call-heavy (betting on a rise)")
+  ), /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      style: {
+        height: 14,
+        borderRadius: 999,
+        background: `linear-gradient(90deg, ${palette.coral}, ${palette.sandDeep} 50%, ${palette.palm})`,
+        position: "relative",
+        boxShadow: "inset 0 1px 3px rgba(0,0,0,0.15)"
+      }
+    },
+    /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        style: {
+          position: "absolute",
+          top: -5,
+          left: `calc(${pct}% - 12px)`,
+          width: 24,
+          height: 24,
+          borderRadius: "50%",
+          background: "#F7C948",
+          border: `3px solid ${palette.ink}`,
+          boxShadow: "0 2px 6px rgba(0,0,0,0.25)",
+          transition: "left 0.8s cubic-bezier(.2,.8,.2,1)"
+        }
+      }
+    )
+  ));
+}
+function MaxPainBox({ sym, getMaxPain }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const load = async () => {
+    setLoading(true);
+    setError(false);
+    try {
+      const d = await getMaxPain(sym);
+      if (!d || typeof d.maxPain !== "number") throw new Error("no data");
+      setData(d);
+    } catch (e) {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (sym) load();
+  }, [sym]);
+  if (error) return null;
+  const spot = data && typeof data.spot === "number" ? data.spot : null;
+  const rel = data && spot != null ? data.maxPain < spot ? "below today's price" : data.maxPain > spot ? "above today's price" : "right about where it's trading" : null;
+  return /* @__PURE__ */ React.createElement("div", { style: { marginTop: 26 } }, /* @__PURE__ */ React.createElement(
+    "h3",
+    {
+      style: {
+        fontFamily: "'Fraunces', serif",
+        fontWeight: 700,
+        fontSize: 20,
+        color: palette.ink,
+        margin: "0 0 8px"
+      }
+    },
+    "\u{1F3AF}",
+    " Max pain"
+  ), loading ? /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      style: {
+        fontFamily: "'Outfit', sans-serif",
+        fontSize: 14.5,
+        color: palette.oceanDark,
+        background: "rgba(255,255,255,0.75)",
+        borderRadius: 12,
+        padding: "14px 18px"
+      }
+    },
+    "Crunching the live options chain",
+    "\u2026"
+  ) : data ? /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      style: {
+        background: "rgba(255,255,255,0.85)",
+        borderRadius: 14,
+        padding: "16px 18px",
+        borderLeft: "5px solid #D9A400"
+      }
+    },
+    /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        style: {
+          fontFamily: "'Fraunces', serif",
+          fontWeight: 900,
+          fontSize: 34,
+          lineHeight: 1,
+          color: palette.oceanDark
+        }
+      },
+      "$",
+      data.maxPain
+    ), spot != null && /* @__PURE__ */ React.createElement("span", { style: { fontFamily: "'Outfit', sans-serif", fontSize: 14, color: palette.ink, opacity: 0.85 } }, "vs. $", spot.toFixed(2), " now ", "\u2014", " the pull sits ", rel)),
+    /* @__PURE__ */ React.createElement(
+      "p",
+      {
+        style: {
+          fontFamily: "'Outfit', sans-serif",
+          fontSize: 14.5,
+          color: palette.ink,
+          lineHeight: 1.55,
+          margin: "10px 0 0"
+        }
+      },
+      "The price where the most options would expire worthless",
+      " ",
+      data.expiration ? `around the ${data.expiration} expiration` : "for the nearest monthly expiration",
+      ". It",
+      "\u2019",
+      "s where options math tends to tug a stock as expiration nears ",
+      "\u2014",
+      " a gentle gravity, not a prediction."
+    ),
+    /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 10, alignItems: "center", marginTop: 12, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("span", { style: { fontFamily: "'Outfit', sans-serif", fontSize: 12, color: palette.ink, opacity: 0.6 } }, "from current options positioning"))
+  ) : null);
+}
+function WatchRow({ item, onPick }) {
+  const up = typeof item.changePct === "number" ? item.changePct >= 0 : typeof item.change === "number" ? item.change >= 0 : null;
+  const changeColor = up == null ? palette.ink : up ? palette.palm : palette.red;
+  return /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => onPick(item.ticker),
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 14,
+        width: "100%",
+        textAlign: "left",
+        background: item.gold ? "linear-gradient(180deg, #FFF6E0, #FBE6B0)" : "rgba(255,255,255,0.9)",
+        border: `2px solid ${item.gold ? "#D9A400" : "rgba(14,116,144,0.25)"}`,
+        borderRadius: 16,
+        padding: "14px 16px",
+        cursor: "pointer"
+      }
+    },
+    /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        style: {
+          width: 44,
+          height: 44,
+          borderRadius: 12,
+          background: item.gold ? "#F7C948" : palette.white,
+          border: "1px solid rgba(0,0,0,0.08)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          overflow: "hidden",
+          flexShrink: 0
+        }
+      },
+      item.gold ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: 24 } }, "\u20BF") : item.logo ? /* @__PURE__ */ React.createElement("img", { src: item.logo, alt: "", style: { width: "100%", height: "100%", objectFit: "contain" } }) : /* @__PURE__ */ React.createElement("span", { style: { fontFamily: "'Fraunces', serif", fontWeight: 900, fontSize: 18, color: palette.oceanDark } }, (item.ticker || "?").slice(0, 1))
+    ),
+    /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        style: {
+          fontFamily: "'Fraunces', serif",
+          fontWeight: 700,
+          fontSize: 16,
+          color: palette.oceanDark,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis"
+        }
+      },
+      item.name || item.ticker
+    ), /* @__PURE__ */ React.createElement("div", { style: { fontFamily: "'Outfit', sans-serif", fontSize: 13, fontWeight: 600, color: palette.ink, opacity: 0.7 } }, item.ticker)),
+    /* @__PURE__ */ React.createElement("div", { style: { textAlign: "right", flexShrink: 0 } }, item.loading ? /* @__PURE__ */ React.createElement("span", { style: { fontFamily: "'Outfit', sans-serif", fontSize: 13, color: palette.ink, opacity: 0.6 } }, "\u2026") : item.gold ? /* @__PURE__ */ React.createElement("span", { style: { fontFamily: "'Outfit', sans-serif", fontSize: 13, fontWeight: 700, color: "#8a5a00" } }, "tap ", "\u203A") : typeof item.price === "number" ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: { fontFamily: "'Fraunces', serif", fontWeight: 900, fontSize: 17, color: palette.ink } }, "$", item.price.toFixed(2)), /* @__PURE__ */ React.createElement("div", { style: { fontFamily: "'Outfit', sans-serif", fontSize: 13, fontWeight: 700, color: changeColor } }, up ? "\u25B2" : "\u25BC", " ", typeof item.changePct === "number" ? (item.changePct >= 0 ? "+" : "") + item.changePct.toFixed(2) + "%" : "")) : /* @__PURE__ */ React.createElement("span", { style: { fontFamily: "'Outfit', sans-serif", fontSize: 12, color: palette.ink, opacity: 0.5 } }, "\u2014"))
+  );
+}
+function WatchlistScreen({ favs, onPick, onBack, getCards }) {
+  const [cards, setCards] = useState({});
+  useEffect(() => {
+    let alive = true;
+    const init = {};
+    (favs || []).forEach((sym) => {
+      init[sym] = { loading: true, ticker: sym };
+    });
+    setCards(init);
+    getCards(favs || []).then((res) => {
+      if (!alive) return;
+      const list = res && res.cards || [];
+      const byTicker = {};
+      list.forEach((c) => {
+        if (c && c.ticker) byTicker[String(c.ticker).toUpperCase()] = { loading: false, ...c };
+      });
+      setCards((prev) => {
+        const next = { ...prev };
+        (favs || []).forEach((sym) => {
+          next[sym] = byTicker[sym] || { loading: false, ticker: sym };
+        });
+        return next;
+      });
+    }).catch(() => {
+      if (!alive) return;
+      setCards((prev) => {
+        const next = { ...prev };
+        (favs || []).forEach((sym) => {
+          next[sym] = { loading: false, ticker: sym };
+        });
+        return next;
+      });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [favs]);
+  return /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      className: "screen screen-analyzer",
+      style: {
+        background: `linear-gradient(180deg, ${palette.sky} 0%, ${palette.sand} 55%, ${palette.sandDeep} 100%)`,
+        paddingTop: 28
+      }
+    },
+    /* @__PURE__ */ React.createElement("style", null, FONTS),
+    /* @__PURE__ */ React.createElement("div", { style: { maxWidth: 620, margin: "0 auto" } }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: onBack,
+        style: {
+          fontFamily: "'Outfit', sans-serif",
+          fontWeight: 600,
+          fontSize: 14,
+          color: palette.oceanDark,
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          padding: 0,
+          marginBottom: 14
+        }
+      },
+      "\u2190",
+      " Back"
+    ), /* @__PURE__ */ React.createElement(
+      "h1",
+      {
+        style: {
+          fontFamily: "'Fraunces', serif",
+          fontWeight: 900,
+          fontSize: "clamp(26px, 6vw, 36px)",
+          color: palette.oceanDark,
+          margin: "0 0 4px"
+        }
+      },
+      "\u{1F4CB}",
+      " Watchlist"
+    ), /* @__PURE__ */ React.createElement(
+      "p",
+      {
+        style: {
+          fontFamily: "'Outfit', sans-serif",
+          fontSize: 15,
+          color: palette.ink,
+          opacity: 0.85,
+          margin: "0 0 18px"
+        }
+      },
+      "Live prices. Tap any one to see both sides of it."
+    ), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } }, /* @__PURE__ */ React.createElement(WatchRow, { item: { ticker: "BTC", name: "Bitcoin", gold: true }, onPick }), (favs || []).map((sym) => /* @__PURE__ */ React.createElement(WatchRow, { key: sym, item: cards[sym] || { ticker: sym, loading: true }, onPick }))))
+  );
+}
+function BtcBadge({ getBtc }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    if (getBtc) {
+      getBtc().then((r) => {
+        if (alive) setD(r);
+      }).catch(() => {
+        if (alive) setErr(true);
+      });
+    }
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const up = d && typeof d.changePct === "number" ? d.changePct >= 0 : null;
+  return /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      style: {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 9,
+        background: "rgba(255,255,255,0.72)",
+        border: "1.5px solid #D9A400",
+        borderRadius: 999,
+        padding: "7px 15px",
+        marginBottom: 22,
+        boxShadow: "0 4px 14px rgba(21,94,117,0.15)"
+      }
+    },
+    /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        style: {
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 24,
+          height: 24,
+          borderRadius: "50%",
+          background: "#F7C948",
+          color: "#8a5a00",
+          fontWeight: 900,
+          fontSize: 15
+        }
+      },
+      "\u20BF"
+    ),
+    /* @__PURE__ */ React.createElement("span", { style: { fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 14, color: palette.ink } }, "Bitcoin"),
+    d && typeof d.price === "number" ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { style: { fontFamily: "'Fraunces', serif", fontWeight: 900, fontSize: 16, color: palette.oceanDark } }, "$", d.price.toLocaleString(void 0, { maximumFractionDigits: 0 })), typeof d.changePct === "number" && /* @__PURE__ */ React.createElement("span", { style: { fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 13, color: up ? palette.palm : palette.red } }, up ? "\u25B2" : "\u25BC", " ", (d.changePct >= 0 ? "+" : "") + d.changePct.toFixed(1), "%")) : err ? /* @__PURE__ */ React.createElement("span", { style: { fontFamily: "'Outfit', sans-serif", fontSize: 13, color: palette.ink, opacity: 0.55 } }, "price unavailable") : /* @__PURE__ */ React.createElement("span", { style: { fontFamily: "'Outfit', sans-serif", fontSize: 13, color: palette.ink, opacity: 0.55 } }, "loading", "\u2026")
+  );
+}
+function CaseCard({ title, emoji, points, accent, bg }) {
+  return /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      className: "case-card",
+      style: {
+        flex: "1 1 260px",
+        background: bg,
+        borderRadius: 18,
+        padding: "20px 22px",
+        border: `2px solid ${accent}`,
+        minWidth: 0
+      }
+    },
+    /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        style: {
+          fontFamily: "'Fraunces', serif",
+          fontWeight: 900,
+          fontSize: 22,
+          color: accent,
+          marginBottom: 12
+        }
+      },
+      emoji,
+      " ",
+      title
+    ),
+    points.map((p, i) => /* @__PURE__ */ React.createElement(
+      "p",
+      {
+        key: i,
+        style: {
+          fontFamily: "'Outfit', sans-serif",
+          fontSize: 15,
+          lineHeight: 1.55,
+          color: palette.ink,
+          margin: "0 0 10px"
+        }
+      },
+      p
+    ))
+  );
+}
+function App() {
+  const [screen, setScreen] = useState("welcome");
+  const [photo, setPhoto] = useState(DEFAULT_PHOTO);
+  const [ticker, setTicker] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [deepLoading, setDeepLoading] = useState(false);
+  const [deepData, setDeepData] = useState(null);
+  const [deepError, setDeepError] = useState("");
+  const [news, setNews] = useState(null);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const [newsError, setNewsError] = useState("");
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfError, setPdfError] = useState("");
+  const [reportImg, setReportImg] = useState(null);
+  const [favs, setFavs] = useState(["MU", "MSTR", "TSLA", "NVTS", "AAPL", "SPCX", "ABAT"]);
+  const [gallery, setGallery] = useState([]);
+  const [favHint, setFavHint] = useState("");
+  const [loadingLine, setLoadingLine] = useState(0);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const fileRef = useRef(null);
+  useEffect(() => {
+    if (!loading && !deepLoading) return;
+    const t = setInterval(() => setLoadingLine((l) => (l + 1) % LOADING_LINES.length), 2600);
+    return () => clearInterval(t);
+  }, [loading, deepLoading]);
+  useEffect(() => {
+    (async () => {
+      try {
+        if (typeof window !== "undefined" && window.storage) {
+          const saved = await window.storage.get("welcome-photo");
+          if (saved && saved.value) setPhoto(saved.value);
+        }
+      } catch (e) {
+      }
+      try {
+        if (typeof window !== "undefined" && window.storage) {
+          const saved = await window.storage.get("photo-gallery");
+          const list = saved && saved.value ? JSON.parse(saved.value) : null;
+          if (Array.isArray(list)) setGallery(list.slice(0, 4));
+        }
+      } catch (e) {
+      }
+      try {
+        if (typeof window !== "undefined" && window.storage) {
+          const saved = await window.storage.get("favorite-tickers");
+          const list = saved && saved.value ? JSON.parse(saved.value) : null;
+          if (Array.isArray(list) && list.length > 0) setFavs(list);
+        }
+      } catch (e) {
+      }
+    })();
+  }, []);
+  const persistFavs = async (list) => {
+    setFavs(list);
+    try {
+      if (typeof window !== "undefined" && window.storage) {
+        await window.storage.set("favorite-tickers", JSON.stringify(list));
+      }
+    } catch (e) {
+      console.error("Couldn't save the ticker list:", e);
+    }
+  };
+  const addFav = () => {
+    const sym = ticker.trim().toUpperCase();
+    setFavHint("");
+    if (!sym) {
+      setFavHint("Type a symbol in the box above, then tap + to keep it here.");
+      return;
+    }
+    if (!/^[A-Z.\-]{1,6}$/.test(sym)) {
+      setFavHint("That doesn't look like a ticker symbol - try something like AAPL.");
+      return;
+    }
+    if (sym === "BTC" || sym === "BITCOIN") {
+      setFavHint("Bitcoin already has its own golden button!");
+      return;
+    }
+    if (favs.includes(sym)) {
+      setFavHint(`${sym} is already in your list.`);
+      return;
+    }
+    if (favs.length >= 8) {
+      setFavHint("That's a full list! Remove one (tap its \xD7) to add another.");
+      return;
+    }
+    persistFavs([...favs, sym]);
+  };
+  const removeFav = (sym) => {
+    setFavHint("");
+    persistFavs(favs.filter((s) => s !== sym));
+  };
+  const persistGallery = async (list) => {
+    setGallery(list);
+    try {
+      if (typeof window !== "undefined" && window.storage) {
+        await window.storage.set("photo-gallery", JSON.stringify(list));
+      }
+    } catch (e) {
+      console.error("Couldn't save the photo gallery:", e);
+    }
+  };
+  const setActivePhoto = async (dataUrl) => {
+    setPhoto(dataUrl);
+    try {
+      if (typeof window !== "undefined" && window.storage) {
+        await window.storage.set("welcome-photo", dataUrl);
+      }
+    } catch (err) {
+      console.error("Couldn't save the photo for next time:", err);
+    }
+  };
+  const onPickPhoto = (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = async () => {
+        const maxW = 720;
+        const scale = Math.min(1, maxW / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+        if (gallery.length < 10) {
+          await persistGallery([...gallery, dataUrl]);
+        }
+        await setActivePhoto(dataUrl);
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  };
+  const removeFromGallery = async (dataUrl) => {
+    await persistGallery(gallery.filter((g) => g !== dataUrl));
+  };
+  const resetPhoto = async () => {
+    setPhoto(DEFAULT_PHOTO);
+    try {
+      if (typeof window !== "undefined" && window.storage) {
+        await window.storage.delete("welcome-photo");
+      }
+    } catch (e) {
+    }
+  };
+  const buildReport = () => {
+    if (!result || pdfBusy) return;
+    setPdfBusy(true);
+    setPdfError("");
+    try {
+      const W = 1080;
+      const pad = 64;
+      const maxW = W - pad * 2;
+      const measure = document.createElement("canvas").getContext("2d");
+      const ink = "#1F3A44";
+      const ocean = "#0E7490";
+      const palm = "#1E8A5E";
+      const coral = "#C24B37";
+      const font = (size, weight, italic) => `${italic ? "italic " : ""}${weight || 400} ${size}px -apple-system, "Helvetica Neue", Arial, sans-serif`;
+      const wrap = (ctx2, text, width) => {
+        const words = String(text).split(/\s+/);
+        const lines = [];
+        let line = "";
+        for (const w of words) {
+          const trial = line ? line + " " + w : w;
+          if (ctx2.measureText(trial).width > width && line) {
+            lines.push(line);
+            line = w;
+          } else {
+            line = trial;
+          }
+        }
+        if (line) lines.push(line);
+        return lines;
+      };
+      const blocks = [];
+      const add = (text, size, weight, color, gap, italic) => {
+        measure.font = font(size, weight, italic);
+        const lines = wrap(measure, text, maxW);
+        blocks.push({ lines, size, weight, color, gap: gap || 0, italic });
+      };
+      const today = (/* @__PURE__ */ new Date()).toLocaleDateString(void 0, { year: "numeric", month: "long", day: "numeric" });
+      add("Two sides of every stock", 44, 800, ocean, 8);
+      add(`${result.companyName || ticker} (${ticker})  \xB7  ${today}`, 24, 600, ink, 8);
+      if (result.oneLiner) add(result.oneLiner, 22, 400, ink, 14, true);
+      if (result.snapshot && (result.snapshot.price || result.snapshot.change10d)) {
+        const bits = [
+          result.snapshot.price,
+          result.snapshot.change10d ? `${result.snapshot.change10d} over ~10 days` : null,
+          result.snapshot.rangeNote
+        ].filter(Boolean);
+        add(bits.join("   \xB7   "), 24, 700, ink, 14);
+      }
+      if (typeof result.tension === "number") {
+        add(`Mood meter: ${signedLabel(signedScore(result.tension))} (-50 = worries dominate, 0 = even, +50 = hopes dominate)`, 20, 400, ink, 18);
+      }
+      const deep = deepData && deepData.sym === ticker ? deepData : null;
+      const bullPts = (deep ? deep.bullCase : result.bullCase) || [];
+      const bearPts = (deep ? deep.bearCase : result.bearCase) || [];
+      add(deep ? "The hopeful case (deep dive)" : "The hopeful case", 30, 800, palm, 8);
+      bullPts.forEach((p, i) => add(`${i + 1}. ${p}`, 22, 400, ink, 6));
+      blocks[blocks.length - 1].gap = 18;
+      add(deep ? "The cautious case (deep dive)" : "The cautious case", 30, 800, coral, 8);
+      bearPts.forEach((p, i) => add(`${i + 1}. ${p}`, 22, 400, ink, 6));
+      blocks[blocks.length - 1].gap = 18;
+      if (deep && deep.options) {
+        add("Options-market sentiment", 30, 800, ocean, 8);
+        add(`Positioning score: ${signedLabel(signedScore(deep.options.score))} (-50 = put-heavy, 0 = balanced, +50 = call-heavy)`, 21, 700, ink, 4);
+        const chips = [deep.options.putCall ? `Put/Call ${deep.options.putCall}` : null, deep.options.ivNote].filter(Boolean).join("   \xB7   ");
+        if (chips) add(chips, 20, 600, ink, 4);
+        if (deep.options.summary) add(deep.options.summary, 21, 400, ink, deep.options.flow ? 4 : 18);
+        if (deep.options.flow) add(deep.options.flow, 20, 400, ink, 18, true);
+      }
+      const watchTxt = deep && deep.watchFor || result.watchFor;
+      if (watchTxt) {
+        add("Keep an eye on", 26, 800, ocean, 6);
+        add(watchTxt, 22, 400, ink, 18);
+      }
+      if (news && news.length > 0) {
+        add("In the news", 30, 800, ocean, 10);
+        news.forEach((s) => {
+          add(s.headline, 23, 700, ink, 3);
+          if (s.summary) add(s.summary, 21, 400, ink, 3);
+          const meta = [s.source, s.when].filter(Boolean).join(" \xB7 ");
+          if (meta) add(meta, 18, 600, ocean, s.url ? 3 : 12, true);
+          if (s.url) add(String(s.url), 16, 400, ocean, 12);
+        });
+      }
+      if (result.fresh === false) {
+        add("Note: live research wasn't available for this analysis, so it reflects general knowledge rather than same-day news.", 18, 400, ink, 8, true);
+      }
+      add("Made with love. A research tool, not financial advice - stocks can go down as well as up.", 18, 400, ink, 0, true);
+      let H = pad;
+      for (const b of blocks) H += b.lines.length * b.size * 1.35 + b.gap;
+      H += pad;
+      const canvas = document.createElement("canvas");
+      canvas.width = W;
+      canvas.height = Math.ceil(H);
+      const ctx = canvas.getContext("2d");
+      const bg = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      bg.addColorStop(0, "#EFF7F9");
+      bg.addColorStop(1, "#F6EDD8");
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, W, canvas.height);
+      let y = pad;
+      for (const b of blocks) {
+        ctx.font = font(b.size, b.weight, b.italic);
+        ctx.fillStyle = b.color;
+        ctx.textBaseline = "top";
+        for (const line of b.lines) {
+          ctx.fillText(line, pad, y);
+          y += b.size * 1.35;
+        }
+        y += b.gap;
+      }
+      setReportImg(canvas.toDataURL("image/png"));
+    } catch (err) {
+      console.error(err);
+      setPdfError("Couldn't build the report just now. Give it another try in a moment.");
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+  const callClaude = async (prompt, useSearch) => {
+    const response = await fetch(`${PROXY}/ai`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, model: "sonar" })
+    });
+    const data = await response.json();
+    if (!data || data.error) {
+      throw new Error("AI error: " + (data && data.error || "no response"));
+    }
+    const text = (data.text || "").replace(/```json|```/g, "").trim();
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start === -1 || end === -1) throw new Error("No JSON in reply");
+    return JSON.parse(text.slice(start, end + 1));
+  };
+  const getBtc = async () => {
+    const r = await fetch(`${PROXY}/btc`);
+    const d = await r.json();
+    if (!d || typeof d.price !== "number") throw new Error("no btc price");
+    return d;
+  };
+  const getCards = async (syms) => {
+    const list = (syms || []).join(",");
+    const r = await fetch(`${PROXY}/cards?tickers=${encodeURIComponent(list)}`);
+    const d = await r.json();
+    if (!d || !Array.isArray(d.cards)) throw new Error("no cards");
+    return d;
+  };
+  const getMaxPain = async (sym) => {
+    const r = await fetch(`${PROXY}/maxpain?ticker=${encodeURIComponent(sym)}`);
+    const d = await r.json();
+    if (!d || typeof d.maxPain !== "number") throw new Error("no max pain");
+    return d;
+  };
+  const STYLE_RULES = `Write for a smart general reader with no finance background; whenever a financial term is unavoidable, explain it in everyday words in the same sentence. Include concrete specifics - recent numbers, dates, names of products or events - wherever you can. Respond with ONLY a minified single-line JSON object: no markdown fences, no preamble, no citations. Output nothing but the JSON.`;
+  const bullPrompt = (sym, useSearch) => `${useSearch ? `Search the web for the latest news, price action, and analyst opinions for ${assetPhrase(sym)}.` : `Using your general knowledge, consider ${assetPhrase(sym)}.`} Then give the OPTIMIST'S side only, as JSON in exactly this shape:
+{"companyName":"full company name","oneLiner":"one friendly sentence saying what this company or asset is, in everyday words","points":["5 items, each 2-3 sentences: the strongest honest reasons an optimist likes this investment right now, each built around a different theme (growth, financials, competitive position, momentum, upcoming opportunities)","...","...","...","..."]}
+${STYLE_RULES}`;
+  const bearPrompt = (sym, useSearch) => `${useSearch ? `Search the web for the latest news, price action, risks, and criticisms for ${assetPhrase(sym)}.` : `Using your general knowledge, consider ${assetPhrase(sym)}.`} Then give the SKEPTIC'S side only, as JSON in exactly this shape:
+{"points":["5 items, each 2-3 sentences: the strongest honest reasons a skeptic is cautious about this investment right now, each built around a different theme (valuation, competition, risks, weaknesses, what could go wrong)","...","...","...","..."],"tension":55,"watchFor":"one or two sentences on the next real-world event to watch (an earnings report, a product launch, a court ruling), with rough timing if known"}
+"tension" is 0-100 where 0 means the worries clearly outweigh the hopes and 100 means the hopes clearly outweigh the worries - be honest, not diplomatic. ${STYLE_RULES}`;
+  const researchSide = async (promptFn, sym) => {
+    try {
+      const parsed = await callClaude(promptFn(sym, true), true);
+      parsed.fresh = true;
+      return parsed;
+    } catch (searchErr) {
+      console.error("Search-powered call failed, falling back:", searchErr);
+      const parsed = await callClaude(promptFn(sym, false), false);
+      parsed.fresh = false;
+      return parsed;
+    }
+  };
+  const assetPhrase = (sym) => sym === "BTC" ? "the cryptocurrency Bitcoin (BTC)" : `the stock ticker ${sym}`;
+  const quickPrompt = (sym, useSearch) => `${useSearch ? `Search the web for the latest news and price action for ${assetPhrase(sym)}.` : `Using your general knowledge, consider ${assetPhrase(sym)}.`} Then respond as JSON in exactly this shape:
+{"companyName":"full company name","oneLiner":"one friendly sentence saying what this company or asset is, in everyday words","snapshot":{"price":"current or most recent price with $, like '$63.41'","change10d":"percent move over roughly the last 10 trading days with sign, like '+4.2%' or '-3.1%'","rangeNote":"one short phrase of recent context, like 'near its 52-week low' or 'close to record highs'"},"bullCase":["3 short items, ONE sentence each: the strongest honest reasons an optimist likes this investment","...","..."],"bearCase":["3 short items, ONE sentence each: the strongest honest reasons a skeptic is cautious","...","..."],"tension":55,"watchFor":"one short sentence on the next real-world event to watch (an earnings report, a product launch, a court ruling)"}
+For "snapshot": only include values you are confident in from ${useSearch ? "the search results" : "your knowledge"}; if unsure of any value, use null for it. Keep every string SHORT. "tension" is 0-100 where 0 means the worries clearly outweigh the hopes and 100 means the hopes clearly outweigh the worries - be honest, not diplomatic. ${STYLE_RULES}`;
+  const researchQuick = async (sym) => {
+    try {
+      const parsed = await callClaude(quickPrompt(sym, true), true);
+      parsed.fresh = true;
+      return parsed;
+    } catch (searchErr) {
+      console.error("Search-powered call failed, falling back:", searchErr);
+      const parsed = await callClaude(quickPrompt(sym, false), false);
+      parsed.fresh = false;
+      return parsed;
+    }
+  };
+  const quotePrompt = (sym) => `Search the web for the current price of ${assetPhrase(sym)} right now. Respond as JSON in exactly this shape:
+{"price":"current or most recent price with $, like '$63.41'","change10d":"percent move over roughly the last 10 trading days with sign, like '+4.2%' or '-3.1%'","rangeNote":"one short phrase of recent context, like 'near its 52-week low'","asOf":"how fresh the price is, in a couple words, like 'today 1:05 PM ET' or 'yesterday's close'"}
+Use the freshest quote you can find and only include values you are confident in - use null for anything unsure. Respond with ONLY the minified JSON, no fences, no citations.`;
+  const refreshQuote = async () => {
+    const sym = ticker.trim().toUpperCase();
+    if (!sym || quoteLoading) return;
+    setQuoteLoading(true);
+    try {
+      if (PROXY) {
+        try {
+          const pr = await fetch(`${PROXY}/quote?ticker=${sym}`);
+          const pd = await pr.json();
+          if (pd && typeof pd.price === "number") {
+            setResult((prev) => prev ? { ...prev, snapshot: { ...prev.snapshot || {}, price: "$" + pd.price.toFixed(2), asOf: "live" } } : prev);
+            setQuoteLoading(false);
+            return;
+          }
+        } catch (pe) {
+          console.error("Proxy quote failed, falling back to AI:", pe);
+        }
+      }
+      const q = await callClaude(quotePrompt(sym), true);
+      setResult((prev) => prev ? { ...prev, snapshot: { ...prev.snapshot || {}, ...q } } : prev);
+    } catch (err) {
+      console.error("Quote refresh failed:", err);
+    } finally {
+      setQuoteLoading(false);
+    }
+  };
+  const newsPrompt = (sym) => `Search the web for the latest news stories about ${assetPhrase(sym)}. Pick the 5 most recent and relevant stories. Respond as JSON in exactly this shape:
+{"stories":[{"headline":"the story's headline, shortened if needed","summary":"1-2 sentences in everyday words on what happened and why it matters for the stock","source":"publication name","when":"rough date, like 'Jul 8' or 'this week'","url":"the story's actual URL exactly as it appears in the search results, or null if you are not certain of it"},{"headline":"...","summary":"...","source":"...","when":"...","url":"..."}]}
+Only include a url you saw verbatim in the search results - never construct or guess one. Order newest first. ${STYLE_RULES}`;
+  const fetchNews = async () => {
+    const sym = ticker.trim().toUpperCase();
+    if (!sym || newsLoading) return;
+    setNewsLoading(true);
+    setNewsError("");
+    try {
+      let parsed;
+      try {
+        parsed = await callClaude(newsPrompt(sym), true);
+      } catch (firstTry) {
+        parsed = await callClaude(newsPrompt(sym), true);
+      }
+      setNews(Array.isArray(parsed.stories) ? parsed.stories : []);
+    } catch (err) {
+      console.error(err);
+      setNewsError("Couldn't fetch the news just now. Give it another try in a moment.");
+    } finally {
+      setNewsLoading(false);
+    }
+  };
+  const analyze = async (symbol) => {
+    let sym = (symbol || ticker).trim().toUpperCase();
+    if (sym === "BITCOIN") sym = "BTC";
+    if (!sym) return;
+    setTicker(sym);
+    setLoading(true);
+    setError("");
+    setResult(null);
+    setDeepError("");
+    setDeepData(null);
+    setNews(null);
+    setNewsError("");
+    setLoadingLine(0);
+    try {
+      const [parsed, bull, bear, options] = await Promise.all([
+        researchQuick(sym),
+        researchSide(bullPrompt, sym),
+        researchSide(bearPrompt, sym),
+        callClaude(optionsPrompt(sym), true).catch((e) => {
+          console.error("Options sentiment failed:", e);
+          return null;
+        })
+      ]);
+      parsed.depth = "full";
+      const judged = await judgeTension(bull.points || [], bear.points || []);
+      if (typeof judged === "number") parsed.tension = judged;
+      else if (typeof bear.tension === "number") parsed.tension = bear.tension;
+      if (bear.watchFor) parsed.watchFor = bear.watchFor;
+      setResult(parsed);
+      setDeepData({
+        sym,
+        companyName: bull.companyName || parsed.companyName,
+        oneLiner: bull.oneLiner || parsed.oneLiner,
+        bullCase: bull.points || [],
+        bearCase: bear.points || [],
+        tension: parsed.tension,
+        watchFor: bear.watchFor || parsed.watchFor,
+        options: options && typeof options.score === "number" ? options : null,
+        fresh: bull.fresh && bear.fresh
+      });
+      refreshQuote();
+    } catch (err) {
+      console.error(err);
+      setError("Couldn't finish the research just now. Give it another try in a moment.");
+    } finally {
+      setLoading(false);
+    }
+  };
+  const judgeTension = async (bullPts, bearPts) => {
+    try {
+      const prompt = `You are a strictly neutral investment judge. Below are the strongest case FOR and the strongest case AGAINST an investment, prepared by two separate researchers. Weigh them against each other and rate the overall balance.
+CASE FOR (bull):
+${bullPts.map((p, i) => `${i + 1}. ${p}`).join("\n")}
+CASE AGAINST (bear):
+${bearPts.map((p, i) => `${i + 1}. ${p}`).join("\n")}
+Respond with ONLY a minified JSON object in exactly this shape:
+{"tension":55}
+"tension" is 0-100 where 0 means the case against clearly dominates, 50 means they are evenly balanced, and 100 means the case for clearly dominates. Judge only from the arguments above - be honest, not diplomatic.`;
+      const parsed = await callClaude(prompt, false);
+      return typeof parsed.tension === "number" ? Math.max(0, Math.min(100, parsed.tension)) : null;
+    } catch (e) {
+      console.error("Neutral judge failed:", e);
+      return null;
+    }
+  };
+  const optionsPrompt = (sym) => `Search the web for current options market data and sentiment for ${assetPhrase(sym)}: the put/call ratio, implied volatility level or IV rank, and any notable recent options flow or unusual activity. Respond as JSON in exactly this shape:
+{"score":55,"putCall":"the put/call ratio as found, like '0.85', or null","ivNote":"one short phrase on implied volatility, like 'IV ~45%, elevated for this name', or null","flow":"one sentence on any notable recent options activity, or null","summary":"2-3 sentences interpreting what options traders seem positioned for, in plain but trader-respecting language"}
+"score" is 0-100 where 0 means positioning is heavily in puts (bracing for a fall) and 100 means heavily in calls (betting on a rise); 50 is balanced. Base it on the put/call ratio and flow you actually find. Only include values you are confident in - use null otherwise. Respond with ONLY the minified JSON, no fences, no citations.`;
+  const goDeeper = async () => {
+    const sym = ticker.trim().toUpperCase();
+    if (!sym) return;
+    setScreen("deep");
+    if (deepLoading || deepData && deepData.sym === sym) return;
+    setDeepLoading(true);
+    setDeepError("");
+    setDeepData(null);
+    setLoadingLine(0);
+    try {
+      const [bull, bear, options] = await Promise.all([
+        researchSide(bullPrompt, sym),
+        researchSide(bearPrompt, sym),
+        callClaude(optionsPrompt(sym), true).catch((e) => {
+          console.error("Options sentiment failed:", e);
+          return null;
+        })
+      ]);
+      setDeepData({
+        sym,
+        companyName: bull.companyName,
+        oneLiner: bull.oneLiner,
+        bullCase: bull.points || [],
+        bearCase: bear.points || [],
+        tension: bear.tension,
+        watchFor: bear.watchFor,
+        options: options && typeof options.score === "number" ? options : null,
+        fresh: bull.fresh && bear.fresh
+      });
+    } catch (err) {
+      console.error(err);
+      setDeepError("Couldn't finish the deep research just now. Give it another try in a moment.");
+    } finally {
+      setDeepLoading(false);
+    }
+  };
+  if (screen === "welcome") {
+    return /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        className: "screen screen-welcome",
+        style: {
+          position: "relative",
+          background: `linear-gradient(180deg, ${palette.sky} 0%, ${palette.skyDeep} 42%, ${palette.sand} 70%, ${palette.sandDeep} 100%)`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          paddingTop: 32,
+          overflow: "hidden"
+        }
+      },
+      /* @__PURE__ */ React.createElement("style", null, FONTS + `
+          @keyframes billFlex {
+            0% { transform: scaleX(var(--flip)) rotateY(-24deg) rotateX(6deg); }
+            100% { transform: scaleX(var(--flip)) rotateY(24deg) rotateX(-6deg); }
+          }
+          @keyframes rainFallPhoto {
+            0% { transform: translateY(0) translateX(0) rotate(var(--tilt)); opacity: 0; }
+            6% { opacity: 0.6; }
+            50% { transform: translateY(310px) translateX(calc(var(--drift) / 2)) rotate(calc(var(--tilt) * -1)); opacity: 0.6; }
+            100% { transform: translateY(620px) translateX(var(--drift)) rotate(var(--tilt)); opacity: 0.6; }
+          }
+          @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+          @media (prefers-reduced-motion: reduce) {
+            * { animation: none !important; transition: none !important; }
+          }
+        `),
+      /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          style: {
+            position: "relative",
+            zIndex: 2,
+            textAlign: "center",
+            maxWidth: 460,
+            width: "100%"
+          }
+        },
+        /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            style: {
+              fontFamily: "'Fraunces', serif",
+              fontWeight: 900,
+              fontSize: "clamp(38px, 8vw, 56px)",
+              color: palette.oceanDark,
+              lineHeight: 1.05,
+              marginBottom: 6,
+              textShadow: "0 2px 0 rgba(255,255,255,0.6)"
+            }
+          },
+          "Hey Jane \u{1F44B}"
+        ),
+        /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            style: {
+              fontFamily: "'Outfit', sans-serif",
+              fontWeight: 600,
+              fontSize: 18,
+              color: palette.ink,
+              marginBottom: 22
+            }
+          },
+          "Your personal two-sides stock analyzer.",
+          /* @__PURE__ */ React.createElement("br", null),
+          "Beach chair optional, but recommended."
+        ),
+        /* @__PURE__ */ React.createElement(BtcBadge, { getBtc }),
+        /* @__PURE__ */ React.createElement("div", { style: { animation: "bob 5s ease-in-out infinite" } }, /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            style: {
+              position: "relative",
+              width: "min(78vw, 320px)",
+              margin: "0 auto",
+              borderRadius: 24,
+              border: `6px solid ${palette.white}`,
+              boxShadow: "0 14px 40px rgba(21,94,117,0.35)",
+              transform: "rotate(-2deg)",
+              overflow: "hidden",
+              // clips the rain to the photo's rounded edges
+              lineHeight: 0
+            }
+          },
+          /* @__PURE__ */ React.createElement(
+            "img",
+            {
+              src: photo,
+              alt: "Welcome photo",
+              style: { width: "100%", display: "block" }
+            }
+          ),
+          /* @__PURE__ */ React.createElement(PhotoRain, null)
+        )),
+        /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            style: {
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: 8,
+              marginTop: 14,
+              flexWrap: "wrap"
+            }
+          },
+          /* @__PURE__ */ React.createElement(
+            "img",
+            {
+              src: DEFAULT_PHOTO,
+              alt: "The original beach photo - tap to use it",
+              onClick: resetPhoto,
+              style: {
+                width: 52,
+                height: 52,
+                objectFit: "cover",
+                borderRadius: 12,
+                border: photo === DEFAULT_PHOTO ? `3px solid ${palette.coral}` : `3px solid ${palette.white}`,
+                boxShadow: "0 3px 10px rgba(21,94,117,0.3)",
+                cursor: "pointer",
+                display: "block"
+              }
+            }
+          ),
+          gallery.map((g, i) => /* @__PURE__ */ React.createElement("span", { key: i, style: { position: "relative", display: "inline-block" } }, /* @__PURE__ */ React.createElement(
+            "img",
+            {
+              src: g,
+              alt: `Saved photo ${i + 1} - tap to use it`,
+              onClick: () => setActivePhoto(g),
+              style: {
+                width: 52,
+                height: 52,
+                objectFit: "cover",
+                borderRadius: 12,
+                border: photo === g ? `3px solid ${palette.coral}` : `3px solid ${palette.white}`,
+                boxShadow: "0 3px 10px rgba(21,94,117,0.3)",
+                cursor: "pointer",
+                display: "block"
+              }
+            }
+          ), /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              onClick: () => removeFromGallery(g),
+              "aria-label": `Remove saved photo ${i + 1}`,
+              style: {
+                position: "absolute",
+                top: -7,
+                right: -7,
+                width: 22,
+                height: 22,
+                minHeight: 22,
+                borderRadius: "50%",
+                background: palette.white,
+                border: `1.5px solid ${palette.ocean}`,
+                color: palette.oceanDark,
+                fontSize: 13,
+                fontWeight: 700,
+                lineHeight: 1,
+                padding: 0,
+                cursor: "pointer"
+              }
+            },
+            "\xD7"
+          ))),
+          gallery.length < 10 && /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              onClick: () => fileRef.current && fileRef.current.click(),
+              "aria-label": "Add a photo to your saved set",
+              style: {
+                width: 52,
+                height: 52,
+                minHeight: 52,
+                borderRadius: 12,
+                background: "rgba(255,255,255,0.7)",
+                border: `2px dashed ${palette.ocean}`,
+                color: palette.oceanDark,
+                fontSize: 24,
+                fontWeight: 700,
+                cursor: "pointer",
+                padding: 0
+              }
+            },
+            "+"
+          )
+        ),
+        /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            style: {
+              fontFamily: "'Outfit', sans-serif",
+              fontSize: 13,
+              color: palette.oceanDark,
+              opacity: 0.85,
+              marginTop: 8
+            }
+          },
+          "Tap + to add your own photos \xB7 tap any picture to use it"
+        ),
+        photo !== DEFAULT_PHOTO && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            onClick: resetPhoto,
+            style: {
+              marginTop: 6,
+              fontFamily: "'Outfit', sans-serif",
+              fontWeight: 600,
+              fontSize: 12.5,
+              color: palette.oceanDark,
+              opacity: 0.8,
+              background: "transparent",
+              border: "none",
+              textDecoration: "underline",
+              textUnderlineOffset: 3,
+              cursor: "pointer"
+            }
+          },
+          "Back to the beach photo"
+        )),
+        /* @__PURE__ */ React.createElement("input", { ref: fileRef, type: "file", accept: "image/*", onChange: onPickPhoto, style: { display: "none" } }),
+        /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            onClick: () => setScreen("analyzer"),
+            style: {
+              marginTop: 22,
+              fontFamily: "'Fraunces', serif",
+              fontWeight: 700,
+              fontSize: 20,
+              color: palette.white,
+              background: `linear-gradient(180deg, ${palette.coral}, ${palette.coralDark})`,
+              border: "none",
+              borderRadius: 999,
+              padding: "16px 34px",
+              cursor: "pointer",
+              boxShadow: "0 8px 22px rgba(194,75,55,0.4)"
+            }
+          },
+          "\u{1F379} Let's look at some stocks"
+        ))
+      )
+    );
+  }
+  if (screen === "deep") {
+    return /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        className: "screen screen-analyzer",
+        style: {
+          background: `linear-gradient(180deg, ${palette.sky} 0%, ${palette.sand} 55%, ${palette.sandDeep} 100%)`,
+          paddingTop: 28
+        }
+      },
+      /* @__PURE__ */ React.createElement("style", null, FONTS + `
+          @keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+          @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+        `),
+      /* @__PURE__ */ React.createElement("div", { style: { maxWidth: 760, margin: "0 auto" } }, /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          onClick: () => setScreen("analyzer"),
+          style: {
+            fontFamily: "'Outfit', sans-serif",
+            fontWeight: 600,
+            fontSize: 14,
+            color: palette.oceanDark,
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            padding: 0,
+            marginBottom: 14
+          }
+        },
+        "\u2190 Back to the quick take"
+      ), /* @__PURE__ */ React.createElement(
+        "h1",
+        {
+          style: {
+            fontFamily: "'Fraunces', serif",
+            fontWeight: 900,
+            fontSize: "clamp(26px, 6vw, 36px)",
+            color: palette.oceanDark,
+            margin: "0 0 4px"
+          }
+        },
+        "\u{1F93F} Deep dive: ",
+        deepData && deepData.companyName || result && result.companyName || ticker
+      ), deepLoading && /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          style: {
+            fontFamily: "'Outfit', sans-serif",
+            fontSize: 16,
+            fontWeight: 600,
+            color: palette.oceanDark,
+            background: "rgba(255,255,255,0.75)",
+            borderRadius: 14,
+            padding: "18px 20px",
+            marginTop: 14,
+            animation: "fadeUp 0.4s ease"
+          }
+        },
+        "\u{1F3D6}\uFE0F ",
+        LOADING_LINES[loadingLine]
+      ), deepError && !deepLoading && /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          style: {
+            fontFamily: "'Outfit', sans-serif",
+            fontSize: 15,
+            color: palette.coralDark,
+            background: "rgba(255,255,255,0.8)",
+            border: `2px solid ${palette.coral}`,
+            borderRadius: 14,
+            padding: "14px 18px",
+            marginTop: 14
+          }
+        },
+        deepError,
+        /* @__PURE__ */ React.createElement("div", { style: { marginTop: 10 } }, /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            onClick: () => {
+              setDeepData(null);
+              goDeeper();
+            },
+            style: {
+              fontFamily: "'Outfit', sans-serif",
+              fontWeight: 700,
+              fontSize: 14,
+              color: palette.white,
+              background: `linear-gradient(180deg, ${palette.ocean}, ${palette.oceanDark})`,
+              border: "none",
+              borderRadius: 999,
+              padding: "10px 20px",
+              cursor: "pointer"
+            }
+          },
+          "Try again"
+        ))
+      ), deepData && !deepLoading && /* @__PURE__ */ React.createElement("div", { style: { animation: "fadeUp 0.5s ease" } }, /* @__PURE__ */ React.createElement(
+        "p",
+        {
+          style: {
+            fontFamily: "'Outfit', sans-serif",
+            fontSize: 15,
+            color: palette.ink,
+            opacity: 0.85,
+            margin: "0 0 18px",
+            lineHeight: 1.5
+          }
+        },
+        deepData.oneLiner,
+        deepData.fresh === false && /* @__PURE__ */ React.createElement("em", { style: { display: "block", fontSize: 13, opacity: 0.8, marginTop: 6 } }, "Note: live research wasn't available just now, so this reflects general knowledge rather than today's news.")
+      ), /* @__PURE__ */ React.createElement(TensionBar, { value: deepData.tension }), deepData.options && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 26 } }, /* @__PURE__ */ React.createElement(
+        "h3",
+        {
+          style: {
+            fontFamily: "'Fraunces', serif",
+            fontWeight: 700,
+            fontSize: 20,
+            color: palette.ink,
+            margin: "0 0 8px"
+          }
+        },
+        "\u{1F3AF} Options-market sentiment"
+      ), /* @__PURE__ */ React.createElement(OptionsBar, { value: deepData.options.score }), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0" } }, deepData.options.putCall && /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          style: {
+            fontFamily: "'Outfit', sans-serif",
+            fontWeight: 700,
+            fontSize: 13.5,
+            color: palette.ink,
+            background: "rgba(255,255,255,0.8)",
+            borderRadius: 999,
+            padding: "6px 14px"
+          }
+        },
+        "Put/Call: ",
+        deepData.options.putCall
+      ), deepData.options.ivNote && /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          style: {
+            fontFamily: "'Outfit', sans-serif",
+            fontWeight: 600,
+            fontSize: 13.5,
+            color: palette.ink,
+            background: "rgba(255,255,255,0.8)",
+            borderRadius: 999,
+            padding: "6px 14px"
+          }
+        },
+        deepData.options.ivNote
+      )), /* @__PURE__ */ React.createElement(
+        "p",
+        {
+          style: {
+            fontFamily: "'Outfit', sans-serif",
+            fontSize: 14.5,
+            color: palette.ink,
+            background: "rgba(255,255,255,0.82)",
+            borderLeft: `5px solid #D9A400`,
+            borderRadius: 12,
+            padding: "14px 18px",
+            lineHeight: 1.55,
+            margin: 0
+          }
+        },
+        deepData.options.summary,
+        deepData.options.flow && /* @__PURE__ */ React.createElement("span", { style: { display: "block", marginTop: 8, opacity: 0.85 } }, "\u{1F4E1} ", deepData.options.flow)
+      )), /* @__PURE__ */ React.createElement(MaxPainBox, { sym: deepData.sym, getMaxPain }), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 16, flexWrap: "wrap", marginTop: 26 } }, /* @__PURE__ */ React.createElement(
+        CaseCard,
+        {
+          title: "The hopeful case",
+          emoji: "\u{1F31E}",
+          points: deepData.bullCase || [],
+          accent: palette.palm,
+          bg: "rgba(255,255,255,0.82)"
+        }
+      ), /* @__PURE__ */ React.createElement(
+        CaseCard,
+        {
+          title: "The cautious case",
+          emoji: "\u{1F30A}",
+          points: deepData.bearCase || [],
+          accent: palette.coralDark,
+          bg: "rgba(255,255,255,0.82)"
+        }
+      )), deepData.watchFor && /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          style: {
+            marginTop: 18,
+            fontFamily: "'Outfit', sans-serif",
+            fontSize: 15,
+            color: palette.ink,
+            background: "rgba(255,255,255,0.82)",
+            borderLeft: `5px solid ${palette.ocean}`,
+            borderRadius: 12,
+            padding: "14px 18px",
+            lineHeight: 1.5
+          }
+        },
+        /* @__PURE__ */ React.createElement("strong", { style: { color: palette.oceanDark } }, "\u{1F440} Keep an eye on:"),
+        " ",
+        deepData.watchFor
+      ), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 18, textAlign: "center" } }, /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          onClick: buildReport,
+          disabled: pdfBusy,
+          style: {
+            fontFamily: "'Outfit', sans-serif",
+            fontWeight: 700,
+            fontSize: 15,
+            color: pdfBusy ? "#9DB8C0" : palette.oceanDark,
+            background: "rgba(255,255,255,0.8)",
+            border: `2px solid ${pdfBusy ? "#9DB8C0" : palette.ocean}`,
+            borderRadius: 999,
+            padding: "12px 24px",
+            cursor: pdfBusy ? "default" : "pointer"
+          }
+        },
+        pdfBusy ? "\u{1F4C4} Building your report\u2026" : "\u{1F4C4} Create a savable report"
+      )))),
+      reportImg && /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          style: {
+            position: "fixed",
+            inset: 0,
+            zIndex: 50,
+            background: "rgba(20,40,48,0.88)",
+            overflowY: "auto",
+            padding: "16px 16px 40px"
+          }
+        },
+        /* @__PURE__ */ React.createElement("div", { style: { maxWidth: 560, margin: "0 auto" } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 } }, /* @__PURE__ */ React.createElement("div", { style: { fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 15, color: palette.white, lineHeight: 1.4 } }, "\u{1F447} Press and hold the report to save or share it"), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            onClick: () => setReportImg(null),
+            style: { fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 15, color: palette.ink, background: palette.white, border: "none", borderRadius: 999, padding: "10px 20px", cursor: "pointer", flexShrink: 0 }
+          },
+          "Close"
+        )), /* @__PURE__ */ React.createElement("img", { src: reportImg, alt: "Your stock report - press and hold to save", style: { width: "100%", borderRadius: 16, boxShadow: "0 12px 40px rgba(0,0,0,0.4)" } }))
+      )
+    );
+  }
+  if (screen === "watchlist") {
+    return /* @__PURE__ */ React.createElement(
+      WatchlistScreen,
+      {
+        favs,
+        onPick: (sy) => {
+          setScreen("analyzer");
+          analyze(sy);
+        },
+        onBack: () => setScreen("analyzer"),
+        getCards
+      }
+    );
+  }
+  return /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      className: "screen screen-analyzer",
+      style: {
+        background: `linear-gradient(180deg, ${palette.sky} 0%, ${palette.sand} 55%, ${palette.sandDeep} 100%)`,
+        paddingTop: 28
+      }
+    },
+    /* @__PURE__ */ React.createElement("style", null, FONTS + `
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+        @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+      `),
+    /* @__PURE__ */ React.createElement("div", { style: { maxWidth: 760, margin: "0 auto" } }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => setScreen("welcome"),
+        style: {
+          fontFamily: "'Outfit', sans-serif",
+          fontWeight: 600,
+          fontSize: 14,
+          color: palette.oceanDark,
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          padding: 0,
+          marginBottom: 14
+        }
+      },
+      "\u2190 Back to the beach"
+    ), /* @__PURE__ */ React.createElement(
+      "h1",
+      {
+        style: {
+          fontFamily: "'Fraunces', serif",
+          fontWeight: 900,
+          fontSize: "clamp(28px, 6vw, 40px)",
+          color: palette.oceanDark,
+          margin: "0 0 6px"
+        }
+      },
+      "Two sides of every stock"
+    ), /* @__PURE__ */ React.createElement(
+      "p",
+      {
+        style: {
+          fontFamily: "'Outfit', sans-serif",
+          fontSize: 16,
+          color: palette.ink,
+          margin: "0 0 20px",
+          lineHeight: 1.5
+        }
+      },
+      "Type a company's ticker symbol and get the honest case for it \u2014 and against it \u2014 based on fresh research."
+    ), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 } }, /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        value: ticker,
+        onChange: (e) => setTicker(e.target.value.toUpperCase()),
+        onKeyDown: (e) => e.key === "Enter" && !loading && analyze(),
+        autoCapitalize: "characters",
+        autoCorrect: "off",
+        spellCheck: false,
+        enterKeyHint: "search",
+        placeholder: "Try AAPL, DIS, or NKE",
+        style: {
+          flex: "1 1 220px",
+          fontFamily: "'Outfit', sans-serif",
+          fontSize: 18,
+          fontWeight: 600,
+          letterSpacing: "0.05em",
+          padding: "14px 18px",
+          borderRadius: 14,
+          border: `2px solid ${palette.ocean}`,
+          background: palette.white,
+          color: palette.ink,
+          outline: "none"
+        }
+      }
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => analyze(),
+        disabled: loading || !ticker.trim(),
+        style: {
+          flex: "1 0 auto",
+          fontFamily: "'Outfit', sans-serif",
+          fontWeight: 700,
+          fontSize: 17,
+          color: palette.white,
+          background: loading || !ticker.trim() ? "#9DB8C0" : `linear-gradient(180deg, ${palette.ocean}, ${palette.oceanDark})`,
+          border: "none",
+          borderRadius: 14,
+          padding: "14px 26px",
+          cursor: loading || !ticker.trim() ? "default" : "pointer"
+        }
+      },
+      loading ? "Researching\u2026" : "Look it up"
+    )), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: favHint ? 8 : 26 } }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => setScreen("watchlist"),
+        style: {
+          fontFamily: "'Outfit', sans-serif",
+          fontWeight: 700,
+          fontSize: 13,
+          color: palette.white,
+          background: `linear-gradient(180deg, ${palette.ocean}, ${palette.oceanDark})`,
+          border: "none",
+          borderRadius: 999,
+          padding: "6px 14px",
+          cursor: "pointer"
+        }
+      },
+      "\u{1F4CB}",
+      " Watchlist"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => !loading && analyze("BTC"),
+        style: {
+          fontFamily: "'Outfit', sans-serif",
+          fontWeight: 700,
+          fontSize: 13,
+          color: "#8a5a00",
+          background: "linear-gradient(180deg, #FFE9B8, #F7C948)",
+          border: "1.5px solid #D9A400",
+          borderRadius: 999,
+          padding: "6px 14px",
+          cursor: "pointer"
+        }
+      },
+      "\u20BF Bitcoin"
+    ), favs.map((s) => /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        key: s,
+        style: {
+          display: "inline-flex",
+          alignItems: "center",
+          background: "rgba(255,255,255,0.7)",
+          border: `1.5px solid ${palette.ocean}`,
+          borderRadius: 999,
+          overflow: "hidden"
+        }
+      },
+      /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          onClick: () => !loading && analyze(s),
+          style: {
+            fontFamily: "'Outfit', sans-serif",
+            fontWeight: 600,
+            fontSize: 13,
+            color: palette.oceanDark,
+            background: "transparent",
+            border: "none",
+            padding: "6px 4px 6px 14px",
+            cursor: "pointer"
+          }
+        },
+        s
+      ),
+      /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          onClick: () => removeFav(s),
+          "aria-label": `Remove ${s}`,
+          style: {
+            fontFamily: "'Outfit', sans-serif",
+            fontWeight: 700,
+            fontSize: 13,
+            color: palette.oceanDark,
+            opacity: 0.55,
+            background: "transparent",
+            border: "none",
+            padding: "6px 12px 6px 6px",
+            cursor: "pointer"
+          }
+        },
+        "\xD7"
+      )
+    )), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: addFav,
+        "aria-label": "Add the typed symbol to your list",
+        style: {
+          fontFamily: "'Outfit', sans-serif",
+          fontWeight: 700,
+          fontSize: 15,
+          color: palette.white,
+          background: `linear-gradient(180deg, ${palette.ocean}, ${palette.oceanDark})`,
+          border: "none",
+          borderRadius: 999,
+          padding: "6px 15px",
+          cursor: "pointer"
+        }
+      },
+      "+"
+    )), favHint && /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        style: {
+          fontFamily: "'Outfit', sans-serif",
+          fontSize: 13,
+          color: palette.oceanDark,
+          marginBottom: 20
+        }
+      },
+      favHint
+    ), loading && /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        style: {
+          fontFamily: "'Outfit', sans-serif",
+          fontSize: 16,
+          fontWeight: 600,
+          color: palette.oceanDark,
+          background: "rgba(255,255,255,0.75)",
+          borderRadius: 14,
+          padding: "18px 20px",
+          animation: "fadeUp 0.4s ease"
+        }
+      },
+      "\u{1F3D6}\uFE0F ",
+      LOADING_LINES[loadingLine]
+    ), error && /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        style: {
+          fontFamily: "'Outfit', sans-serif",
+          fontSize: 15,
+          color: palette.coralDark,
+          background: "rgba(255,255,255,0.8)",
+          border: `2px solid ${palette.coral}`,
+          borderRadius: 14,
+          padding: "14px 18px"
+        }
+      },
+      error
+    ), result && !loading && /* @__PURE__ */ React.createElement("div", { style: { animation: "fadeUp 0.5s ease" } }, /* @__PURE__ */ React.createElement(
+      "h2",
+      {
+        style: {
+          fontFamily: "'Fraunces', serif",
+          fontWeight: 700,
+          fontSize: 26,
+          color: palette.ink,
+          margin: "0 0 4px"
+        }
+      },
+      result.companyName
+    ), /* @__PURE__ */ React.createElement(
+      "p",
+      {
+        style: {
+          fontFamily: "'Outfit', sans-serif",
+          fontSize: 15,
+          color: palette.ink,
+          opacity: 0.85,
+          margin: "0 0 18px",
+          lineHeight: 1.5
+        }
+      },
+      result.oneLiner,
+      result.fresh === false && /* @__PURE__ */ React.createElement("em", { style: { display: "block", fontSize: 13, opacity: 0.8, marginTop: 6 } }, "Note: live research wasn't available just now, so this reflects general knowledge rather than today's news.")
+    ), result.snapshot && (result.snapshot.price || result.snapshot.change10d) && /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        style: {
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: 10,
+          margin: "0 0 18px"
+        }
+      },
+      result.snapshot.price && /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          style: {
+            fontFamily: "'Fraunces', serif",
+            fontWeight: 900,
+            fontSize: 24,
+            color: palette.ink,
+            background: "rgba(255,255,255,0.85)",
+            borderRadius: 12,
+            padding: "8px 16px"
+          }
+        },
+        result.snapshot.price
+      ),
+      result.snapshot.change10d && /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          style: {
+            fontFamily: "'Outfit', sans-serif",
+            fontWeight: 700,
+            fontSize: 16,
+            color: palette.white,
+            background: String(result.snapshot.change10d).trim().startsWith("-") ? `linear-gradient(180deg, ${palette.coral}, ${palette.coralDark})` : `linear-gradient(180deg, #2AA06E, ${palette.palm})`,
+            borderRadius: 999,
+            padding: "8px 16px"
+          }
+        },
+        String(result.snapshot.change10d).trim().startsWith("-") ? "\u25BC" : "\u25B2",
+        " ",
+        result.snapshot.change10d,
+        /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 500, opacity: 0.9 } }, " \xB7 10 days")
+      ),
+      result.snapshot.rangeNote && /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          style: {
+            fontFamily: "'Outfit', sans-serif",
+            fontSize: 13.5,
+            color: palette.ink,
+            opacity: 0.8
+          }
+        },
+        result.snapshot.rangeNote
+      ),
+      /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          onClick: refreshQuote,
+          disabled: quoteLoading,
+          "aria-label": "Refresh the price",
+          style: {
+            fontFamily: "'Outfit', sans-serif",
+            fontWeight: 700,
+            fontSize: 15,
+            color: palette.oceanDark,
+            background: "rgba(255,255,255,0.8)",
+            border: `1.5px solid ${palette.ocean}`,
+            borderRadius: 999,
+            padding: "6px 12px",
+            cursor: quoteLoading ? "default" : "pointer",
+            opacity: quoteLoading ? 0.5 : 1
+          }
+        },
+        quoteLoading ? "\u2026" : "\u21BB"
+      ),
+      result.snapshot.asOf && !quoteLoading && /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          style: {
+            fontFamily: "'Outfit', sans-serif",
+            fontSize: 12,
+            color: palette.ink,
+            opacity: 0.6,
+            width: "100%"
+          }
+        },
+        "Price as of ",
+        result.snapshot.asOf,
+        " \u2014 tap \u21BB for the latest"
+      )
+    ), /* @__PURE__ */ React.createElement(TensionBar, { value: result.tension }), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 16, flexWrap: "wrap", marginTop: 20 } }, /* @__PURE__ */ React.createElement(
+      CaseCard,
+      {
+        title: "The hopeful case",
+        emoji: "\u{1F31E}",
+        points: result.bullCase || [],
+        accent: palette.palm,
+        bg: "rgba(255,255,255,0.82)"
+      }
+    ), /* @__PURE__ */ React.createElement(
+      CaseCard,
+      {
+        title: "The cautious case",
+        emoji: "\u{1F30A}",
+        points: result.bearCase || [],
+        accent: palette.coralDark,
+        bg: "rgba(255,255,255,0.82)"
+      }
+    )), result.watchFor && /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        style: {
+          marginTop: 18,
+          fontFamily: "'Outfit', sans-serif",
+          fontSize: 15,
+          color: palette.ink,
+          background: "rgba(255,255,255,0.82)",
+          borderLeft: `5px solid ${palette.ocean}`,
+          borderRadius: 12,
+          padding: "14px 18px",
+          lineHeight: 1.5
+        }
+      },
+      /* @__PURE__ */ React.createElement("strong", { style: { color: palette.oceanDark } }, "\u{1F440} Keep an eye on:"),
+      " ",
+      result.watchFor
+    ), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 22, textAlign: "center" } }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: goDeeper,
+        style: {
+          fontFamily: "'Fraunces', serif",
+          fontWeight: 700,
+          fontSize: 20,
+          color: palette.white,
+          background: `linear-gradient(180deg, ${palette.ocean}, ${palette.oceanDark})`,
+          border: "none",
+          borderRadius: 999,
+          padding: "16px 30px",
+          cursor: "pointer",
+          boxShadow: "0 6px 18px rgba(21,94,117,0.35)"
+        }
+      },
+      "\u{1F93F} Open the deep dive"
+    ), /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        style: {
+          fontFamily: "'Outfit', sans-serif",
+          fontSize: 12.5,
+          color: palette.ink,
+          opacity: 0.7,
+          marginTop: 8
+        }
+      },
+      "A fuller case for each side, plus options-market sentiment \u2014 already loaded, opens instantly."
+    )), !news && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 14, textAlign: "center" } }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: fetchNews,
+        disabled: newsLoading,
+        style: {
+          fontFamily: "'Outfit', sans-serif",
+          fontWeight: 700,
+          fontSize: 15,
+          color: newsLoading ? "#9DB8C0" : palette.oceanDark,
+          background: "rgba(255,255,255,0.8)",
+          border: `2px solid ${newsLoading ? "#9DB8C0" : palette.ocean}`,
+          borderRadius: 999,
+          padding: "12px 24px",
+          cursor: newsLoading ? "default" : "pointer"
+        }
+      },
+      newsLoading ? "\u{1F5DE}\uFE0F Gathering headlines\u2026" : `\u{1F5DE}\uFE0F Latest news on ${result.companyName ? result.companyName.split(" ")[0] : ticker}`
+    ), newsError && /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        style: {
+          fontFamily: "'Outfit', sans-serif",
+          fontSize: 13.5,
+          color: palette.coralDark,
+          marginTop: 10
+        }
+      },
+      newsError
+    )), news && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 24, animation: "fadeUp 0.5s ease" } }, /* @__PURE__ */ React.createElement(
+      "h3",
+      {
+        style: {
+          fontFamily: "'Fraunces', serif",
+          fontWeight: 700,
+          fontSize: 20,
+          color: palette.ink,
+          margin: "0 0 12px"
+        }
+      },
+      "\u{1F5DE}\uFE0F In the news"
+    ), news.length === 0 && /* @__PURE__ */ React.createElement("p", { style: { fontFamily: "'Outfit', sans-serif", fontSize: 14, color: palette.ink } }, "No recent stories turned up \u2014 quiet week for this one."), news.map((s, i) => {
+      const hasLink = s.url && /^https?:\/\//.test(String(s.url));
+      const card = /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          style: {
+            background: "rgba(255,255,255,0.82)",
+            borderRadius: 14,
+            padding: "14px 18px",
+            marginBottom: 10
+          }
+        },
+        /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            style: {
+              fontFamily: "'Outfit', sans-serif",
+              fontWeight: 700,
+              fontSize: 15,
+              color: hasLink ? palette.oceanDark : palette.ink,
+              lineHeight: 1.4,
+              textDecoration: hasLink ? "underline" : "none",
+              textUnderlineOffset: 3
+            }
+          },
+          s.headline
+        ),
+        /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            style: {
+              fontFamily: "'Outfit', sans-serif",
+              fontSize: 14,
+              color: palette.ink,
+              opacity: 0.9,
+              margin: "6px 0",
+              lineHeight: 1.5
+            }
+          },
+          s.summary
+        ),
+        /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            style: {
+              fontFamily: "'Outfit', sans-serif",
+              fontSize: 12.5,
+              color: palette.oceanDark,
+              fontWeight: 600
+            }
+          },
+          [s.source, s.when].filter(Boolean).join(" \xB7 "),
+          hasLink && " \xB7 Read the story \u2192"
+        )
+      );
+      return hasLink ? /* @__PURE__ */ React.createElement(
+        "a",
+        {
+          key: i,
+          href: s.url,
+          target: "_blank",
+          rel: "noopener noreferrer",
+          style: { textDecoration: "none", display: "block" }
+        },
+        card
+      ) : /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, card);
+    })), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 18, textAlign: "center" } }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: buildReport,
+        disabled: pdfBusy,
+        style: {
+          fontFamily: "'Outfit', sans-serif",
+          fontWeight: 700,
+          fontSize: 15,
+          color: pdfBusy ? "#9DB8C0" : palette.oceanDark,
+          background: "rgba(255,255,255,0.8)",
+          border: `2px solid ${pdfBusy ? "#9DB8C0" : palette.ocean}`,
+          borderRadius: 999,
+          padding: "12px 24px",
+          cursor: pdfBusy ? "default" : "pointer"
+        }
+      },
+      pdfBusy ? "\u{1F4C4} Building your report\u2026" : "\u{1F4C4} Create a savable report"
+    ), pdfError && /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        style: {
+          fontFamily: "'Outfit', sans-serif",
+          fontSize: 13.5,
+          color: palette.coralDark,
+          marginTop: 10
+        }
+      },
+      pdfError
+    ))), /* @__PURE__ */ React.createElement(
+      "p",
+      {
+        style: {
+          fontFamily: "'Outfit', sans-serif",
+          fontSize: 12.5,
+          color: palette.ink,
+          opacity: 0.65,
+          marginTop: 36,
+          lineHeight: 1.5
+        }
+      },
+      "This is a research tool made with love, not financial advice. Stocks can go down as well as up \u2014 always make your own decisions (ideally from a beach chair).",
+      /* @__PURE__ */ React.createElement("span", { style: { display: "block", marginTop: 8, fontSize: 11, opacity: 0.7 } }, "v41")
+    )),
+    reportImg && /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        style: {
+          position: "fixed",
+          inset: 0,
+          zIndex: 50,
+          background: "rgba(20,40,48,0.88)",
+          overflowY: "auto",
+          padding: "16px 16px 40px"
+        }
+      },
+      /* @__PURE__ */ React.createElement("div", { style: { maxWidth: 560, margin: "0 auto" } }, /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          style: {
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 10,
+            marginBottom: 12
+          }
+        },
+        /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            style: {
+              fontFamily: "'Outfit', sans-serif",
+              fontWeight: 700,
+              fontSize: 15,
+              color: palette.white,
+              lineHeight: 1.4
+            }
+          },
+          "\u{1F447} Press and hold the report to save or share it"
+        ),
+        /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            onClick: () => setReportImg(null),
+            style: {
+              fontFamily: "'Outfit', sans-serif",
+              fontWeight: 700,
+              fontSize: 15,
+              color: palette.ink,
+              background: palette.white,
+              border: "none",
+              borderRadius: 999,
+              padding: "10px 20px",
+              cursor: "pointer",
+              flexShrink: 0
+            }
+          },
+          "Close"
+        )
+      ), /* @__PURE__ */ React.createElement(
+        "img",
+        {
+          src: reportImg,
+          alt: "Your stock report - press and hold to save",
+          style: {
+            width: "100%",
+            borderRadius: 16,
+            boxShadow: "0 12px 40px rgba(0,0,0,0.4)"
+          }
+        }
+      ))
+    )
+  );
+}
+const __root = ReactDOM.createRoot(document.getElementById("root"));
+__root.render(React.createElement(App));
+
+</script>
+</body>
+</html>
