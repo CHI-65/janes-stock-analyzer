@@ -1715,16 +1715,27 @@ export default function App() {
           if (v && okScreens.indexOf(v.screen) !== -1) {
             const sym = (v.ticker || "").trim().toUpperCase();
             if ((v.screen === "analyzer" || v.screen === "deep") && sym) {
-              // Re-run fresh research for the saved ticker (a stale price or
-              // analysis would be worse than a quick refresh), then land on
-              // the exact page she left.
               setTicker(sym);
-              setScreen("analyzer");
-              try {
-                await analyze(sym);
-                if (v.screen === "deep") setScreen("deep");
-              } catch (e) {
-                // Refresh failed - the analyzer form (ticker prefilled) stands
+              if (v.result && v.result.ticker === sym) {
+                // Reuse last session's analysis text (no fresh AI pull), but
+                // blank the saved price and pull ONLY a live quote — so we never
+                // re-spend AI on resume and never show a stale price.
+                const r = JSON.parse(JSON.stringify(v.result));
+                if (r.snapshot) { r.snapshot.price = null; r.snapshot.asOf = null; }
+                setResult(r);
+                if (v.deepData && v.deepData.sym === sym) setDeepData(v.deepData);
+                setScreen(v.screen === "deep" ? "deep" : "analyzer");
+                refreshQuote(sym);
+              } else {
+                // No cached analysis for this ticker (older session) — do one
+                // full analysis, which itself pulls a fresh live price.
+                setScreen("analyzer");
+                try {
+                  await analyze(sym);
+                  if (v.screen === "deep") setScreen("deep");
+                } catch (e) {
+                  // Refresh failed - the analyzer form (ticker prefilled) stands
+                }
               }
             } else if (v.screen !== "analyzer" && v.screen !== "deep") {
               setScreen(v.screen);
@@ -1739,18 +1750,19 @@ export default function App() {
     })();
   }, []);
 
-  // Once restore has run, remember the current screen + ticker on every change
-  // so the next visit resumes here.
+  // Once restore has run, remember the current screen + ticker AND the last
+  // analysis (result + deepData) on every change, so a return visit can resume
+  // the exact page with its content — no fresh AI pull, just a live price.
   useEffect(() => {
     if (!restoredRef.current) return;
     try {
       if (typeof window !== "undefined" && window.storage) {
-        window.storage.set("last-view", JSON.stringify({ screen, ticker }));
+        window.storage.set("last-view", JSON.stringify({ screen, ticker, result, deepData }));
       }
     } catch (e) {
       // Resuming is a convenience, not required - ignore save failures
     }
-  }, [screen, ticker]);
+  }, [screen, ticker, result, deepData]);
 
   const persistPlaces = async (list) => {
     const clean = (Array.isArray(list) ? list : []).slice(0, MAX_PLACES);
@@ -2122,18 +2134,25 @@ For "snapshot": only include values you are confident in from ${useSearch ? "the
 {"price":"current or most recent price with $, like '$63.41'","change10d":"percent move over roughly the last 10 trading days with sign, like '+4.2%' or '-3.1%'","rangeNote":"one short phrase of recent context, like 'near its 52-week low'","asOf":"how fresh the price is, in a couple words, like 'today 1:05 PM ET' or 'yesterday's close'"}
 Use the freshest quote you can find and only include values you are confident in - use null for anything unsure. Respond with ONLY the minified JSON, no fences, no citations.`;
 
-  const refreshQuote = async () => {
-    const sym = ticker.trim().toUpperCase();
+  const refreshQuote = async (symArg) => {
+    // symArg may be a string (from analyze/resume) or an event (from the ↻
+    // button's onClick) — only trust a real string, else use current ticker.
+    const sym = ((typeof symArg === "string" ? symArg : "") || ticker).trim().toUpperCase();
     if (!sym || quoteLoading) return;
     setQuoteLoading(true);
     try {
-      // Live price via the proxy (Finnhub) when configured; else fall back to AI research
+      // Live price via the proxy (Finnhub for stocks, our own feed for Bitcoin);
+      // fall back to a dedicated AI price search only if the proxy has nothing.
       if (PROXY) {
         try {
-          const pr = await fetch(`${PROXY}/quote?ticker=${sym}`);
+          const url = sym === "BTC" ? `${PROXY}/btc` : `${PROXY}/quote?ticker=${sym}`;
+          const pr = await fetch(url);
           const pd = await pr.json();
           if (pd && typeof pd.price === "number") {
-            setResult((prev) => prev ? { ...prev, snapshot: { ...(prev.snapshot || {}), price: "$" + pd.price.toFixed(2), asOf: "live" } } : prev);
+            const priceStr = sym === "BTC"
+              ? "$" + Math.round(pd.price).toLocaleString()
+              : "$" + pd.price.toFixed(2);
+            setResult((prev) => prev ? { ...prev, snapshot: { ...(prev.snapshot || {}), price: priceStr, asOf: "live" } } : prev);
             setQuoteLoading(false);
             return;
           }
@@ -2203,6 +2222,11 @@ Only include a url you saw verbatim in the search results - never construct or g
         }),
       ]);
       parsed.depth = "full";
+      parsed.ticker = sym; // stamp so a resumed session knows which ticker this is
+      // Never show the AI's snapshot price — it can be badly stale (e.g. a months-
+      // old TSLA quote). Blank it up front so no nonsense number ever flashes;
+      // refreshQuote() below fills in the real live price a beat later.
+      if (parsed.snapshot) { parsed.snapshot.price = null; parsed.snapshot.asOf = null; }
       // ONE source of truth for the bull/bear mood on BOTH pages:
       // a strictly neutral judge weighs BOTH finished cases side by side
       const judged = await judgeTension(bull.points || [], bear.points || []);
@@ -2221,7 +2245,7 @@ Only include a url you saw verbatim in the search results - never construct or g
         options: options && typeof options.score === "number" ? options : null,
         fresh: bull.fresh && bear.fresh,
       });
-      refreshQuote(); // dedicated pass for the freshest possible price
+      refreshQuote(sym); // dedicated pass for the freshest possible price
     } catch (err) {
       console.error(err);
       setError("Couldn't finish the research just now. Give it another try in a moment.");
@@ -3132,7 +3156,7 @@ Respond with ONLY a minified JSON object in exactly this shape:
               )}
             </p>
 
-            {result.snapshot && (result.snapshot.price || result.snapshot.change10d) && (
+            {result.snapshot && (result.snapshot.price || result.snapshot.change10d || quoteLoading) && (
               <div
                 style={{
                   display: "flex",
@@ -3142,7 +3166,7 @@ Respond with ONLY a minified JSON object in exactly this shape:
                   margin: "0 0 18px",
                 }}
               >
-                {result.snapshot.price && (
+                {result.snapshot.price ? (
                   <span
                     style={{
                       fontFamily: "'Fraunces', serif",
@@ -3156,7 +3180,21 @@ Respond with ONLY a minified JSON object in exactly this shape:
                   >
                     {result.snapshot.price}
                   </span>
-                )}
+                ) : quoteLoading ? (
+                  <span
+                    style={{
+                      fontFamily: "'Outfit', sans-serif",
+                      fontWeight: 600,
+                      fontSize: 14,
+                      color: palette.oceanDark,
+                      background: "rgba(255,255,255,0.85)",
+                      borderRadius: 12,
+                      padding: "10px 16px",
+                    }}
+                  >
+                    Getting live price…
+                  </span>
+                ) : null}
                 {result.snapshot.change10d && (
                   <span
                     style={{
