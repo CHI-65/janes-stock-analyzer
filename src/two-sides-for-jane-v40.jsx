@@ -1397,6 +1397,9 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const fileRef = useRef(null);
+  // Gate for "resume last state": don't save the screen until we've first
+  // tried to restore it, so the default "welcome" can't overwrite the saved one.
+  const restoredRef = useRef(false);
 
   useEffect(() => {
     if (!loading && !deepLoading) return;
@@ -1441,8 +1444,54 @@ export default function App() {
       } catch (e) {
         // No saved trading link yet
       }
+
+      // Resume where Jane left off: restore the last screen (and, for an
+      // analysis, its ticker) so leaving and reopening the app doesn't dump
+      // her back on the welcome page.
+      try {
+        if (typeof window !== "undefined" && window.storage) {
+          const saved = await window.storage.get("last-view");
+          const v = saved && saved.value ? JSON.parse(saved.value) : null;
+          const okScreens = ["welcome", "watchlist", "ask", "analyzer", "deep"];
+          if (v && okScreens.indexOf(v.screen) !== -1) {
+            const sym = (v.ticker || "").trim().toUpperCase();
+            if ((v.screen === "analyzer" || v.screen === "deep") && sym) {
+              // Re-run fresh research for the saved ticker (a stale price or
+              // analysis would be worse than a quick refresh), then land on
+              // the exact page she left.
+              setTicker(sym);
+              setScreen("analyzer");
+              try {
+                await analyze(sym);
+                if (v.screen === "deep") setScreen("deep");
+              } catch (e) {
+                // Refresh failed - the analyzer form (ticker prefilled) stands
+              }
+            } else if (v.screen !== "analyzer" && v.screen !== "deep") {
+              setScreen(v.screen);
+            }
+          }
+        }
+      } catch (e) {
+        // No saved view yet (or storage unavailable) - welcome stands
+      } finally {
+        restoredRef.current = true;
+      }
     })();
   }, []);
+
+  // Once restore has run, remember the current screen + ticker on every change
+  // so the next visit resumes here.
+  useEffect(() => {
+    if (!restoredRef.current) return;
+    try {
+      if (typeof window !== "undefined" && window.storage) {
+        window.storage.set("last-view", JSON.stringify({ screen, ticker }));
+      }
+    } catch (e) {
+      // Resuming is a convenience, not required - ignore save failures
+    }
+  }, [screen, ticker]);
 
   const persistTradeUrl = async (u) => {
     setTradeUrl(u || "");
