@@ -1189,6 +1189,152 @@ function CaseCard({ title, emoji, points, accent, bg }) {
 // How many favorite sites Jane can keep in "My places".
 const MAX_PLACES = 10;
 
+// A popularity-ranked catalog of well-known sites, used to suggest matches as
+// Jane types a name in "Add a place" (e.g. "fidel" -> Fidelity). Roughly ordered
+// by popularity, with finance/brokers weighted up since this is a stock app;
+// when several entries match the same query, earlier (more popular) ones win.
+const POPULAR_SITES = [
+  // Brokerages & investing
+  { n: "Fidelity", d: "fidelity.com" },
+  { n: "Charles Schwab", d: "schwab.com" },
+  { n: "Vanguard", d: "vanguard.com" },
+  { n: "Robinhood", d: "robinhood.com" },
+  { n: "E*TRADE", d: "etrade.com" },
+  { n: "TD Ameritrade", d: "tdameritrade.com" },
+  { n: "Merrill Edge", d: "merrilledge.com" },
+  { n: "Interactive Brokers", d: "interactivebrokers.com" },
+  { n: "tastytrade", d: "tastytrade.com" },
+  { n: "Webull", d: "webull.com" },
+  { n: "SoFi", d: "sofi.com" },
+  { n: "Public", d: "public.com" },
+  { n: "moomoo", d: "moomoo.com" },
+  { n: "Ally Invest", d: "ally.com" },
+  { n: "Firstrade", d: "firstrade.com" },
+  { n: "TradeStation", d: "tradestation.com" },
+  { n: "M1 Finance", d: "m1.com" },
+  { n: "Wealthfront", d: "wealthfront.com" },
+  { n: "Betterment", d: "betterment.com" },
+  // Crypto
+  { n: "Coinbase", d: "coinbase.com" },
+  { n: "Kraken", d: "kraken.com" },
+  { n: "Binance", d: "binance.com" },
+  { n: "Gemini", d: "gemini.com" },
+  { n: "Crypto.com", d: "crypto.com" },
+  // Finance news, data & research
+  { n: "Yahoo Finance", d: "finance.yahoo.com" },
+  { n: "CNBC", d: "cnbc.com" },
+  { n: "Bloomberg", d: "bloomberg.com" },
+  { n: "MarketWatch", d: "marketwatch.com" },
+  { n: "Wall Street Journal", d: "wsj.com" },
+  { n: "Barron's", d: "barrons.com" },
+  { n: "Seeking Alpha", d: "seekingalpha.com" },
+  { n: "The Motley Fool", d: "fool.com" },
+  { n: "Investing.com", d: "investing.com" },
+  { n: "TradingView", d: "tradingview.com" },
+  { n: "Finviz", d: "finviz.com" },
+  { n: "Benzinga", d: "benzinga.com" },
+  { n: "Morningstar", d: "morningstar.com" },
+  { n: "Nasdaq", d: "nasdaq.com" },
+  { n: "NYSE", d: "nyse.com" },
+  { n: "Reuters", d: "reuters.com" },
+  { n: "Financial Times", d: "ft.com" },
+  { n: "Forbes", d: "forbes.com" },
+  { n: "Business Insider", d: "businessinsider.com" },
+  { n: "Kiplinger", d: "kiplinger.com" },
+  { n: "TheStreet", d: "thestreet.com" },
+  { n: "Zacks", d: "zacks.com" },
+  { n: "StockTwits", d: "stocktwits.com" },
+  { n: "Macrotrends", d: "macrotrends.net" },
+  { n: "Koyfin", d: "koyfin.com" },
+  { n: "SEC EDGAR", d: "sec.gov" },
+  { n: "Federal Reserve", d: "federalreserve.gov" },
+  // Banks & payments
+  { n: "Chase", d: "chase.com" },
+  { n: "Bank of America", d: "bankofamerica.com" },
+  { n: "Wells Fargo", d: "wellsfargo.com" },
+  { n: "Citibank", d: "citi.com" },
+  { n: "Capital One", d: "capitalone.com" },
+  { n: "U.S. Bank", d: "usbank.com" },
+  { n: "American Express", d: "americanexpress.com" },
+  { n: "Discover", d: "discover.com" },
+  { n: "PayPal", d: "paypal.com" },
+  { n: "Venmo", d: "venmo.com" },
+  { n: "Cash App", d: "cash.app" },
+  // Mega-popular general sites
+  { n: "Google", d: "google.com" },
+  { n: "YouTube", d: "youtube.com" },
+  { n: "Gmail", d: "mail.google.com" },
+  { n: "Facebook", d: "facebook.com" },
+  { n: "Instagram", d: "instagram.com" },
+  { n: "X (Twitter)", d: "x.com" },
+  { n: "Reddit", d: "reddit.com" },
+  { n: "Wikipedia", d: "wikipedia.org" },
+  { n: "Amazon", d: "amazon.com" },
+  { n: "LinkedIn", d: "linkedin.com" },
+  { n: "Netflix", d: "netflix.com" },
+  { n: "Apple", d: "apple.com" },
+  { n: "Microsoft", d: "microsoft.com" },
+  { n: "Outlook", d: "outlook.com" },
+  { n: "Bing", d: "bing.com" },
+  { n: "Yahoo", d: "yahoo.com" },
+  { n: "TikTok", d: "tiktok.com" },
+  { n: "WhatsApp", d: "whatsapp.com" },
+  { n: "Pinterest", d: "pinterest.com" },
+  { n: "eBay", d: "ebay.com" },
+  { n: "Walmart", d: "walmart.com" },
+  { n: "Target", d: "target.com" },
+  { n: "ChatGPT", d: "chatgpt.com" },
+  { n: "Claude", d: "claude.ai" },
+  { n: "Spotify", d: "spotify.com" },
+  { n: "Twitch", d: "twitch.tv" },
+  { n: "Discord", d: "discord.com" },
+  { n: "Zoom", d: "zoom.us" },
+  { n: "Dropbox", d: "dropbox.com" },
+  { n: "GitHub", d: "github.com" },
+  { n: "Weather.com", d: "weather.com" },
+  { n: "ESPN", d: "espn.com" },
+  { n: "IMDb", d: "imdb.com" },
+  { n: "Etsy", d: "etsy.com" },
+  { n: "Best Buy", d: "bestbuy.com" },
+  { n: "Home Depot", d: "homedepot.com" },
+  { n: "Costco", d: "costco.com" },
+  { n: "Uber", d: "uber.com" },
+  { n: "DoorDash", d: "doordash.com" },
+  { n: "Instacart", d: "instacart.com" },
+  // General news
+  { n: "CNN", d: "cnn.com" },
+  { n: "Fox News", d: "foxnews.com" },
+  { n: "New York Times", d: "nytimes.com" },
+  { n: "Washington Post", d: "washingtonpost.com" },
+  { n: "BBC", d: "bbc.com" },
+  { n: "NPR", d: "npr.org" },
+  { n: "USA Today", d: "usatoday.com" },
+  { n: "AP News", d: "apnews.com" },
+  { n: "The Guardian", d: "theguardian.com" },
+];
+
+// Rank catalog sites against what Jane has typed. A prefix match on the name or
+// the domain's first label (e.g. "fidel" -> "fidelity") ranks highest; then a
+// domain prefix; then a match anywhere. Ties keep catalog (popularity) order.
+function suggestSites(query) {
+  const q = String(query || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (q.length < 2) return [];
+  const out = [];
+  for (let i = 0; i < POPULAR_SITES.length; i++) {
+    const s = POPULAR_SITES[i];
+    const n = s.n.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const d = s.d.toLowerCase();
+    const dbase = d.replace(/^www\./, "").split(".")[0];
+    let tier = -1;
+    if (n.startsWith(q) || dbase.startsWith(q)) tier = 0;
+    else if (d.startsWith(q)) tier = 1;
+    else if (n.indexOf(q) !== -1 || d.indexOf(q) !== -1) tier = 2;
+    if (tier >= 0) out.push({ name: s.n, domain: s.d, tier: tier, idx: i });
+  }
+  out.sort((a, b) => (a.tier - b.tier) || (a.idx - b.idx));
+  return out.slice(0, 7);
+}
+
 // A floating "My places" button on every working screen (not the beach
 // welcome). Tap it to open a shelf of favorite sites (broker, news, charts —
 // up to 10). Tapping a place opens it in the app's own in-app browser via a
@@ -1201,6 +1347,7 @@ function PlacesButton({ places, onSave }) {
   const [nameDraft, setNameDraft] = useState("");
   const [urlDraft, setUrlDraft] = useState("");
   const [note, setNote] = useState("");
+  const [sugg, setSugg] = useState([]);
 
   const list = Array.isArray(places) ? places : [];
 
@@ -1215,12 +1362,16 @@ function PlacesButton({ places, onSave }) {
   };
 
   const openPanel = () => { setMode("list"); setNote(""); setOpen(true); };
-  const closePanel = () => { setOpen(false); setMode("list"); setNote(""); };
-  const startAdd = () => { setNameDraft(""); setUrlDraft(""); setNote(""); setMode("add"); };
+  const closePanel = () => { setOpen(false); setMode("list"); setNote(""); setSugg([]); };
+  const startAdd = () => { setNameDraft(""); setUrlDraft(""); setNote(""); setSugg([]); setMode("add"); };
   const startEdit = (i) => {
     const p = list[i] || {};
-    setNameDraft(p.name || ""); setUrlDraft(p.url || ""); setNote(""); setMode(i);
+    setNameDraft(p.name || ""); setUrlDraft(p.url || ""); setNote(""); setSugg([]); setMode(i);
   };
+
+  // Fill both fields from a picked suggestion, then hide the dropdown.
+  const onNameChange = (v) => { setNameDraft(v); setSugg(suggestSites(v)); };
+  const pickSite = (s) => { setNameDraft(s.name); setUrlDraft("https://" + s.domain); setSugg([]); setNote(""); };
 
   const pasteFromClipboard = async () => {
     try {
@@ -1246,10 +1397,10 @@ function PlacesButton({ places, onSave }) {
       next = list.map((p, i) => (i === mode ? { name, url } : p));
     }
     onSave(next);
-    setMode("list"); setNote("");
+    setMode("list"); setNote(""); setSugg([]);
   };
 
-  const removeAt = (i) => { onSave(list.filter((_, idx) => idx !== i)); setMode("list"); setNote(""); };
+  const removeAt = (i) => { onSave(list.filter((_, idx) => idx !== i)); setMode("list"); setNote(""); setSugg([]); };
 
   const sheet = (children) => (
     <div
@@ -1371,14 +1522,37 @@ function PlacesButton({ places, onSave }) {
             {mode === "add" ? "＋ Add a place" : "✏️ Edit place"}
           </div>
           <div style={Object.assign({ marginBottom: 12 }, sub)}>
-            Give it a name and paste the web address. It'll open inside the app.
+            Start typing a name to search popular sites — or paste any web address. It'll open inside the app.
           </div>
           <input
             value={nameDraft}
-            onChange={(e) => setNameDraft(e.target.value)}
-            placeholder="Name (e.g. Fidelity, CNBC)"
-            style={Object.assign({ marginBottom: 10 }, inputStyle)}
+            onChange={(e) => onNameChange(e.target.value)}
+            placeholder="Search a site (e.g. Fidelity, CNBC)"
+            style={Object.assign({ marginBottom: sugg.length ? 8 : 10 }, inputStyle)}
           />
+          {sugg.length > 0 && (
+            <div style={{ border: `1.5px solid ${palette.ocean}`, borderRadius: 12, overflow: "hidden", marginBottom: 10 }}>
+              {sugg.map((s, i) => (
+                <button
+                  key={s.domain}
+                  onClick={() => pickSite(s)}
+                  style={{
+                    display: "flex", alignItems: "baseline", gap: 8, width: "100%", textAlign: "left",
+                    background: palette.white, border: "none",
+                    borderTop: i === 0 ? "none" : "1px solid rgba(0,0,0,0.08)",
+                    padding: "11px 14px", cursor: "pointer",
+                  }}
+                >
+                  <span style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 14.5, color: palette.oceanDark }}>
+                    {s.name}
+                  </span>
+                  <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 12.5, color: palette.ink, opacity: 0.6 }}>
+                    {s.domain}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
           <input
             value={urlDraft}
             onChange={(e) => setUrlDraft(e.target.value)}
