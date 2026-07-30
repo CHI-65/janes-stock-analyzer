@@ -1493,9 +1493,17 @@ export default function App() {
           let plist = saved && saved.value ? JSON.parse(saved.value) : null;
           if (!Array.isArray(plist)) {
             // Migrate the old single "Trade" link into the new places list so
-            // nothing Jane already saved is lost.
+            // nothing Jane already saved is lost. Name it exactly as the new
+            // "Add a place" flow would if you added this URL without typing a
+            // name: the site's hostname (e.g. "fidelity.com").
             const old = await window.storage.get("trade-url");
-            if (old && old.value) plist = [{ name: "Trade", url: old.value }];
+            if (old && old.value) {
+              let ou = String(old.value).trim();
+              if (ou && !/^https?:\/\//i.test(ou)) ou = "https://" + ou;
+              let onm = ou;
+              try { onm = new URL(ou).hostname.replace(/^www\./, ""); } catch (e) {}
+              plist = [{ name: onm, url: ou }];
+            }
           }
           if (Array.isArray(plist)) setPlaces(plist.slice(0, MAX_PLACES));
         }
