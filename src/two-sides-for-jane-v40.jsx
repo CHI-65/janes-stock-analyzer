@@ -1189,6 +1189,14 @@ function CaseCard({ title, emoji, points, accent, bg }) {
 // How many favorite sites Jane can keep in "My places".
 const MAX_PLACES = 10;
 
+// The starter set a brand-new device sees before Jane customizes "My places".
+const DEFAULT_PLACES = [
+  { name: "StockTwits", url: "https://stocktwits.com" },
+  { name: "Yahoo Finance", url: "https://finance.yahoo.com" },
+  { name: "MarketWatch", url: "https://marketwatch.com" },
+  { name: "CNN", url: "https://cnn.com" },
+];
+
 // A popularity-ranked catalog of well-known sites, used to suggest matches as
 // Jane types a name in "Add a place" (e.g. "fidel" -> Fidelity). Roughly ordered
 // by popularity, with finance/brokers weighted up since this is a stock app;
@@ -1666,18 +1674,29 @@ export default function App() {
           const saved = await window.storage.get("places");
           let plist = saved && saved.value ? JSON.parse(saved.value) : null;
           if (!Array.isArray(plist)) {
-            // Migrate the old single "Trade" link into the new places list so
-            // nothing Jane already saved is lost. Name it exactly as the new
-            // "Add a place" flow would if you added this URL without typing a
-            // name: the site's hostname (e.g. "fidelity.com").
+            // First run on this device: seed the list so it isn't empty. If an
+            // old single "Trade" link exists, keep it as the FIRST place (named
+            // the way "Add a place" would — the site's hostname), then add the
+            // default starter sites. De-dupe by hostname. All of these are fully
+            // editable/removable afterward.
+            const seed = [];
             const old = await window.storage.get("trade-url");
             if (old && old.value) {
               let ou = String(old.value).trim();
               if (ou && !/^https?:\/\//i.test(ou)) ou = "https://" + ou;
               let onm = ou;
               try { onm = new URL(ou).hostname.replace(/^www\./, ""); } catch (e) {}
-              plist = [{ name: onm, url: ou }];
+              seed.push({ name: onm, url: ou });
             }
+            DEFAULT_PLACES.forEach((p) => seed.push({ name: p.name, url: p.url }));
+            const seen = {};
+            plist = seed.filter((p) => {
+              let host = p.url;
+              try { host = new URL(p.url).hostname.replace(/^www\./, ""); } catch (e) {}
+              if (seen[host]) return false;
+              seen[host] = true;
+              return true;
+            });
           }
           if (Array.isArray(plist)) setPlaces(plist.slice(0, MAX_PLACES));
         }
