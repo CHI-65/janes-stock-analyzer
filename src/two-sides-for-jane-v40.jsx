@@ -1186,189 +1186,240 @@ function CaseCard({ title, emoji, points, accent, bg }) {
   );
 }
 
-// A user-defined "Trade" button that floats on every working screen (not the
-// beach welcome). A quick tap opens the saved trading site; a long-press (or a
-// tap when nothing is saved yet) opens a box to paste your broker's web address.
-function TradeButton({ tradeUrl, onSet }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
+// How many favorite sites Jane can keep in "My places".
+const MAX_PLACES = 10;
+
+// A floating "My places" button on every working screen (not the beach
+// welcome). Tap it to open a shelf of favorite sites (broker, news, charts —
+// up to 10). Tapping a place opens it in the app's own in-app browser via a
+// same-window link, so a home-screen install stays inside the app instead of
+// bouncing out to Safari. Add, edit, and remove places right from the shelf.
+function PlacesButton({ places, onSave }) {
+  const [open, setOpen] = useState(false);
+  // "list" = the shelf, "add" = new-place form, a number = editing that index
+  const [mode, setMode] = useState("list");
+  const [nameDraft, setNameDraft] = useState("");
+  const [urlDraft, setUrlDraft] = useState("");
   const [note, setNote] = useState("");
-  const timer = useRef(null);
-  const longFired = useRef(false);
 
-  const openEditor = () => { setDraft(tradeUrl || ""); setNote(""); setEditing(true); };
-  const openSite = () => {
-    if (!tradeUrl) { openEditor(); return; }
-    let w = null;
-    try { w = window.open(tradeUrl, "_blank"); } catch (e) {}
-    if (w) { try { w.opener = null; } catch (e) {} }
-    else { try { window.location.href = tradeUrl; } catch (e) {} }
-  };
-  const clearTimer = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } };
-  const onDown = () => {
-    longFired.current = false;
-    clearTimer();
-    timer.current = setTimeout(() => { longFired.current = true; openEditor(); }, 500);
-  };
-  const onUp = () => { if (timer.current) { clearTimer(); if (!longFired.current) openSite(); } };
-  const onLeave = () => clearTimer();
+  const list = Array.isArray(places) ? places : [];
 
-  const pasteFromClipboard = async () => {
-    try {
-      if (navigator.clipboard && navigator.clipboard.readText) {
-        const t = await navigator.clipboard.readText();
-        if (t && t.trim()) { setDraft(t.trim()); setNote(""); return; }
-      }
-      setNote("Couldn't read the clipboard automatically — paste into the box above.");
-    } catch (e) {
-      setNote("Your browser blocked the paste — tap the box above and paste there.");
-    }
-  };
   const norm = (u) => {
     let s = String(u || "").trim();
     if (!s) return "";
     if (!/^https?:\/\//i.test(s)) s = "https://" + s;
     return s;
   };
-  const save = () => {
-    const u = norm(draft);
-    if (!u) { setNote("Paste your trading site's web address first."); return; }
-    onSet(u);
-    setEditing(false);
+  const hostLabel = (u) => {
+    try { return new URL(norm(u)).hostname.replace(/^www\./, ""); } catch (e) { return String(u || ""); }
   };
+
+  const openPanel = () => { setMode("list"); setNote(""); setOpen(true); };
+  const closePanel = () => { setOpen(false); setMode("list"); setNote(""); };
+  const startAdd = () => { setNameDraft(""); setUrlDraft(""); setNote(""); setMode("add"); };
+  const startEdit = (i) => {
+    const p = list[i] || {};
+    setNameDraft(p.name || ""); setUrlDraft(p.url || ""); setNote(""); setMode(i);
+  };
+
+  const pasteFromClipboard = async () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        const t = await navigator.clipboard.readText();
+        if (t && t.trim()) { setUrlDraft(t.trim()); setNote(""); return; }
+      }
+      setNote("Couldn't read the clipboard — paste into the box above.");
+    } catch (e) {
+      setNote("Your browser blocked the paste — tap the box above and paste there.");
+    }
+  };
+
+  const saveDraft = () => {
+    const url = norm(urlDraft);
+    if (!url) { setNote("Paste the site's web address first."); return; }
+    const name = (nameDraft || "").trim() || hostLabel(url);
+    let next;
+    if (mode === "add") {
+      if (list.length >= MAX_PLACES) { setNote("That's 10 places already — remove one to add another."); return; }
+      next = list.concat([{ name, url }]);
+    } else {
+      next = list.map((p, i) => (i === mode ? { name, url } : p));
+    }
+    onSave(next);
+    setMode("list"); setNote("");
+  };
+
+  const removeAt = (i) => { onSave(list.filter((_, idx) => idx !== i)); setMode("list"); setNote(""); };
+
+  const sheet = (children) => (
+    <div
+      onClick={closePanel}
+      style={{
+        position: "fixed", inset: 0, zIndex: 70, background: "rgba(20,40,48,0.7)",
+        display: "flex", alignItems: "flex-end", justifyContent: "center",
+        padding: "0 0 max(24px, env(safe-area-inset-bottom))",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%", maxWidth: 460, margin: "0 14px", maxHeight: "80vh",
+          overflowY: "auto", background: palette.white, borderRadius: 18,
+          padding: "20px 20px 18px", boxShadow: "0 16px 50px rgba(0,0,0,0.4)",
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+
+  const label = { fontFamily: "'Fraunces', serif", fontWeight: 900, fontSize: 20, color: palette.oceanDark };
+  const sub = { fontFamily: "'Outfit', sans-serif", fontSize: 13.5, color: palette.ink, opacity: 0.75, lineHeight: 1.45 };
+  const inputStyle = {
+    width: "100%", boxSizing: "border-box", fontFamily: "'Outfit', sans-serif", fontSize: 15,
+    padding: "12px 14px", borderRadius: 12, border: `2px solid ${palette.ocean}`,
+    background: palette.white, color: palette.ink, outline: "none",
+  };
+  const pill = (bg, color, extra) => Object.assign({
+    fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 13.5, color,
+    background: bg, border: "none", borderRadius: 999, padding: "10px 18px", cursor: "pointer",
+  }, extra || {});
 
   return (
     <>
       <button
-        onPointerDown={onDown}
-        onPointerUp={onUp}
-        onPointerLeave={onLeave}
-        onPointerCancel={onLeave}
-        onContextMenu={(e) => e.preventDefault()}
-        aria-label={tradeUrl ? "Open your trading site — long-press to change the link" : "Set your trading site link"}
-        title={tradeUrl ? "Tap to trade · hold to change the link" : "Hold to set your trading link"}
+        onClick={openPanel}
+        aria-label="My places — your saved sites"
+        title="My places"
         style={{
           position: "fixed",
           right: "max(16px, env(safe-area-inset-right))",
           bottom: "max(18px, calc(env(safe-area-inset-bottom) + 10px))",
-          zIndex: 60,
-          fontFamily: "'Outfit', sans-serif",
-          fontWeight: 800,
-          fontSize: 15,
-          color: palette.white,
-          background: `linear-gradient(180deg, ${palette.palm}, #14663F)`,
-          border: "none",
-          borderRadius: 999,
-          padding: "13px 22px",
-          cursor: "pointer",
-          boxShadow: "0 6px 18px rgba(20,102,63,0.4)",
-          touchAction: "none",
-          userSelect: "none",
-          WebkitUserSelect: "none",
+          zIndex: 60, fontFamily: "'Outfit', sans-serif", fontWeight: 800, fontSize: 15,
+          color: palette.white, background: `linear-gradient(180deg, ${palette.palm}, #14663F)`,
+          border: "none", borderRadius: 999, padding: "13px 22px", cursor: "pointer",
+          boxShadow: "0 6px 18px rgba(20,102,63,0.4)", userSelect: "none", WebkitUserSelect: "none",
         }}
       >
-        {tradeUrl ? "📈 Trade" : "📈 Set link"}
+        {"📍 My places"}
       </button>
 
-      {editing && (
-        <div
-          onClick={() => setEditing(false)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 70,
-            background: "rgba(20,40,48,0.7)",
-            display: "flex",
-            alignItems: "flex-end",
-            justifyContent: "center",
-            padding: "0 0 max(24px, env(safe-area-inset-bottom))",
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
+      {open && mode === "list" && sheet(
+        <>
+          <div style={Object.assign({ marginBottom: 6 }, label)}>📍 My places</div>
+          <div style={Object.assign({ marginBottom: 14 }, sub)}>
+            Your favorite sites — tap one to open it right here in the app.
+          </div>
+
+          {list.length === 0 && (
+            <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 14, color: palette.ink, opacity: 0.7, padding: "6px 0 14px" }}>
+              No places yet. Add your broker, a news site, anything you like.
+            </div>
+          )}
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+            {list.map((p, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "stretch", gap: 8 }}>
+                <a
+                  href={norm(p.url)}
+                  rel="noopener noreferrer"
+                  style={{
+                    flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center",
+                    textDecoration: "none", background: "rgba(14,116,144,0.08)",
+                    border: `1.5px solid ${palette.ocean}`, borderRadius: 12, padding: "10px 14px",
+                  }}
+                >
+                  <span style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 15, color: palette.oceanDark, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {p.name || hostLabel(p.url)}
+                  </span>
+                  <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 12, color: palette.ink, opacity: 0.6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {hostLabel(p.url)}
+                  </span>
+                </a>
+                <button
+                  onClick={() => startEdit(i)}
+                  aria-label={"Edit " + (p.name || hostLabel(p.url))}
+                  style={{
+                    flex: "0 0 auto", fontSize: 16, color: palette.oceanDark, background: "rgba(0,0,0,0.05)",
+                    border: "none", borderRadius: 12, padding: "0 14px", cursor: "pointer",
+                  }}
+                >
+                  ✏️
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display: "flex", gap: 8, justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
+            {list.length < MAX_PLACES ? (
+              <button onClick={startAdd} style={pill(`linear-gradient(180deg, ${palette.ocean}, ${palette.oceanDark})`, palette.white)}>
+                ＋ Add a place
+              </button>
+            ) : (
+              <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 12.5, color: palette.ink, opacity: 0.65 }}>
+                10 places max — remove one to add another.
+              </span>
+            )}
+            <button onClick={closePanel} style={pill("rgba(0,0,0,0.06)", palette.ink)}>Close</button>
+          </div>
+        </>
+      )}
+
+      {open && mode !== "list" && sheet(
+        <>
+          <div style={Object.assign({ marginBottom: 6 }, label)}>
+            {mode === "add" ? "＋ Add a place" : "✏️ Edit place"}
+          </div>
+          <div style={Object.assign({ marginBottom: 12 }, sub)}>
+            Give it a name and paste the web address. It'll open inside the app.
+          </div>
+          <input
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            placeholder="Name (e.g. Fidelity, CNBC)"
+            style={Object.assign({ marginBottom: 10 }, inputStyle)}
+          />
+          <input
+            value={urlDraft}
+            onChange={(e) => setUrlDraft(e.target.value)}
+            placeholder="https://…"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            style={Object.assign({ marginBottom: 10 }, inputStyle)}
+          />
+          <button
+            onClick={pasteFromClipboard}
             style={{
-              width: "100%",
-              maxWidth: 460,
-              margin: "0 14px",
-              background: palette.white,
-              borderRadius: 18,
-              padding: "20px 20px 18px",
-              boxShadow: "0 16px 50px rgba(0,0,0,0.4)",
+              fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 13.5, color: palette.oceanDark,
+              background: "rgba(14,116,144,0.1)", border: `1.5px solid ${palette.ocean}`, borderRadius: 999,
+              padding: "9px 16px", cursor: "pointer", marginBottom: 12,
             }}
           >
-            <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 900, fontSize: 20, color: palette.oceanDark, marginBottom: 6 }}>
-              📈 Your trading site
+            📋 Paste address from clipboard
+          </button>
+          {note && (
+            <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 12.5, color: palette.coralDark, marginBottom: 10, lineHeight: 1.4 }}>
+              {note}
             </div>
-            <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 13.5, color: palette.ink, opacity: 0.75, marginBottom: 12, lineHeight: 1.45 }}>
-              Paste the web address of your broker or trading site. The Trade button will open it from any page.
-            </div>
-            <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="https://…"
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-              style={{
-                width: "100%",
-                boxSizing: "border-box",
-                fontFamily: "'Outfit', sans-serif",
-                fontSize: 15,
-                padding: "12px 14px",
-                borderRadius: 12,
-                border: `2px solid ${palette.ocean}`,
-                background: palette.white,
-                color: palette.ink,
-                outline: "none",
-                marginBottom: 10,
-              }}
-            />
-            <button
-              onClick={pasteFromClipboard}
-              style={{
-                fontFamily: "'Outfit', sans-serif",
-                fontWeight: 700,
-                fontSize: 13.5,
-                color: palette.oceanDark,
-                background: "rgba(14,116,144,0.1)",
-                border: `1.5px solid ${palette.ocean}`,
-                borderRadius: 999,
-                padding: "9px 16px",
-                cursor: "pointer",
-                marginBottom: 12,
-              }}
-            >
-              📋 Paste from clipboard
-            </button>
-            {note && (
-              <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 12.5, color: palette.coralDark, marginBottom: 10, lineHeight: 1.4 }}>
-                {note}
-              </div>
+          )}
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap" }}>
+            {typeof mode === "number" && (
+              <button
+                onClick={() => removeAt(mode)}
+                style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 13.5, color: palette.coralDark, background: "transparent", border: "none", cursor: "pointer", padding: "10px 12px", marginRight: "auto" }}
+              >
+                Remove
+              </button>
             )}
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap" }}>
-              {tradeUrl && (
-                <button
-                  onClick={() => { onSet(""); setEditing(false); }}
-                  style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 13.5, color: palette.coralDark, background: "transparent", border: "none", cursor: "pointer", padding: "10px 12px", marginRight: "auto" }}
-                >
-                  Remove
-                </button>
-              )}
-              <button
-                onClick={() => setEditing(false)}
-                style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 13.5, color: palette.ink, background: "rgba(0,0,0,0.06)", border: "none", borderRadius: 999, padding: "10px 18px", cursor: "pointer" }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={save}
-                style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 800, fontSize: 13.5, color: palette.white, background: `linear-gradient(180deg, ${palette.ocean}, ${palette.oceanDark})`, border: "none", borderRadius: 999, padding: "10px 20px", cursor: "pointer" }}
-              >
-                Save
-              </button>
-            </div>
+            <button onClick={() => { setMode("list"); setNote(""); }} style={pill("rgba(0,0,0,0.06)", palette.ink)}>
+              Back
+            </button>
+            <button onClick={saveDraft} style={pill(`linear-gradient(180deg, ${palette.ocean}, ${palette.oceanDark})`, palette.white, { fontWeight: 800 })}>
+              Save
+            </button>
           </div>
-        </div>
+        </>
       )}
     </>
   );
@@ -1376,7 +1427,7 @@ function TradeButton({ tradeUrl, onSet }) {
 
 export default function App() {
   const [screen, setScreen] = useState("welcome"); // welcome | analyzer
-  const [tradeUrl, setTradeUrl] = useState("");
+  const [places, setPlaces] = useState([]);
   const [photo, setPhoto] = useState(DEFAULT_PHOTO);
   const [ticker, setTicker] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1438,11 +1489,18 @@ export default function App() {
       }
       try {
         if (typeof window !== "undefined" && window.storage) {
-          const saved = await window.storage.get("trade-url");
-          if (saved && saved.value) setTradeUrl(saved.value);
+          const saved = await window.storage.get("places");
+          let plist = saved && saved.value ? JSON.parse(saved.value) : null;
+          if (!Array.isArray(plist)) {
+            // Migrate the old single "Trade" link into the new places list so
+            // nothing Jane already saved is lost.
+            const old = await window.storage.get("trade-url");
+            if (old && old.value) plist = [{ name: "Trade", url: old.value }];
+          }
+          if (Array.isArray(plist)) setPlaces(plist.slice(0, MAX_PLACES));
         }
       } catch (e) {
-        // No saved trading link yet
+        // No saved places yet
       }
 
       // Resume where Jane left off: restore the last screen (and, for an
@@ -1493,15 +1551,15 @@ export default function App() {
     }
   }, [screen, ticker]);
 
-  const persistTradeUrl = async (u) => {
-    setTradeUrl(u || "");
+  const persistPlaces = async (list) => {
+    const clean = (Array.isArray(list) ? list : []).slice(0, MAX_PLACES);
+    setPlaces(clean);
     try {
       if (typeof window !== "undefined" && window.storage) {
-        if (u) await window.storage.set("trade-url", u);
-        else await window.storage.delete("trade-url");
+        await window.storage.set("places", JSON.stringify(clean));
       }
     } catch (e) {
-      console.error("Couldn't save the trading link:", e);
+      console.error("Couldn't save your places:", e);
     }
   };
 
@@ -2568,7 +2626,7 @@ Respond with ONLY a minified JSON object in exactly this shape:
             </div>
           </div>
         )}
-        <TradeButton tradeUrl={tradeUrl} onSet={persistTradeUrl} />
+        <PlacesButton places={places} onSave={persistPlaces} />
       </div>
     );
   }
@@ -2587,7 +2645,7 @@ Respond with ONLY a minified JSON object in exactly this shape:
           getBtc={getBtc}
           onReorder={persistFavs}
         />
-        <TradeButton tradeUrl={tradeUrl} onSet={persistTradeUrl} />
+        <PlacesButton places={places} onSave={persistPlaces} />
       </>
     );
   }
@@ -2595,7 +2653,7 @@ Respond with ONLY a minified JSON object in exactly this shape:
     return (
       <>
         <AskScreen askAI={askAI} onBack={() => setScreen("watchlist")} />
-        <TradeButton tradeUrl={tradeUrl} onSet={persistTradeUrl} />
+        <PlacesButton places={places} onSave={persistPlaces} />
       </>
     );
   }
@@ -3264,7 +3322,7 @@ Respond with ONLY a minified JSON object in exactly this shape:
           </div>
         </div>
       )}
-      <TradeButton tradeUrl={tradeUrl} onSet={persistTradeUrl} />
+      <PlacesButton places={places} onSave={persistPlaces} />
     </div>
   );
 }
