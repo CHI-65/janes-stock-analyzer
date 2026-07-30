@@ -62,10 +62,12 @@ NEW_CC = '''  // The narrative research runs through our Cloudflare proxy, which
   // useSearch is accepted for call-site compatibility but ignored (Sonar
   // always searches). We ask for JSON and pull the first {...} block out.
   const callClaude = async (prompt, useSearch) => {
+    // Per-user fee tracking: count this call and tag it with who's using the app.
+    try { if (typeof window !== "undefined" && window.TWOSIDES_TRACK) window.TWOSIDES_TRACK(); } catch (e) {}
     const response = await fetch(`${PROXY}/ai`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, model: "sonar" }),
+      body: JSON.stringify({ prompt, model: "sonar", u: (function(){try{return window.localStorage.getItem("twosides:device-user")||"";}catch(e){return "";}})() }),
     });
     const data = await response.json();
     if (!data || data.error) {
@@ -128,10 +130,11 @@ NEW_DATA = '''  // Hard numbers come straight from the real feeds (Finnhub / Mar
   };
   // Free-form AI question (returns raw text, not JSON) via the Perplexity proxy.
   const askAI = async (question) => {
+    try { if (typeof window !== "undefined" && window.TWOSIDES_TRACK) window.TWOSIDES_TRACK(); } catch (e) {}
     const r = await fetch(`${PROXY}/ai`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: question, model: "sonar" }),
+      body: JSON.stringify({ prompt: question, model: "sonar", u: (function(){try{return window.localStorage.getItem("twosides:device-user")||"";}catch(e){return "";}})() }),
     });
     const d = await r.json();
     if (!d || d.error) throw new Error((d && d.error) || "AI error");
@@ -140,7 +143,7 @@ NEW_DATA = '''  // Hard numbers come straight from the real feeds (Finnhub / Mar
 s = repl(OLD_DATA, NEW_DATA, "data helpers")
 
 # 5) footer version
-s = repl(">v40</span>", ">v54</span>", "footer version")
+s = repl(">v40</span>", ">v55</span>", "footer version")
 
 # 6) render the app ourselves (artifact runtime used to do this), with a
 #    safety net so a failure shows a message + reload instead of a blank page.

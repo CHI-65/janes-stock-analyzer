@@ -1633,6 +1633,66 @@ export default function App() {
   // Gate for "resume last state": don't save the screen until we've first
   // tried to restore it, so the default "welcome" can't overwrite the saved one.
   const restoredRef = useRef(false);
+  // Hidden admin: per-user API-fee tracking (tap the footer version 5x to open).
+  const [adminOpen, setAdminOpen] = useState(false);
+  const [deviceUser, setDeviceUser] = useState(""); // "cal" | "jane" | ""
+  const [costPerCall, setCostPerCall] = useState(0.006); // editable $ per AI call
+  const [usageTick, setUsageTick] = useState(0); // bump to re-read local counts
+  const adminTapRef = useRef({ n: 0, t: 0 });
+
+  // Load saved admin settings and wire the two globals the /ai calls use:
+  // TWOSIDES_USER (who this device is) tags each call; TWOSIDES_TRACK counts it.
+  useEffect(() => {
+    if (typeof window !== "undefined" && !window.TWOSIDES_TRACK) {
+      window.TWOSIDES_TRACK = function () {
+        try {
+          // Read the identity synchronously from storage so a call that fires
+          // before React has loaded it (e.g. an auto-analysis on resume) still
+          // attributes to the right user instead of "unknown".
+          var u = window.localStorage.getItem("twosides:device-user") || "unknown";
+          var k = "twosides:ai:" + u;
+          // Synchronous localStorage read-modify-write is race-free (single-
+          // threaded JS), so parallel calls in one analysis all count.
+          var n = parseInt(window.localStorage.getItem(k) || "0", 10) || 0;
+          window.localStorage.setItem(k, String(n + 1));
+        } catch (e) {}
+      };
+    }
+    (async () => {
+      try {
+        if (typeof window !== "undefined" && window.storage) {
+          const u = await window.storage.get("device-user");
+          if (u && u.value) setDeviceUser(u.value);
+          const c = await window.storage.get("cost-per-call");
+          if (c && c.value) { const n = parseFloat(c.value); if (n > 0) setCostPerCall(n); }
+        }
+      } catch (e) {}
+    })();
+  }, []);
+  useEffect(() => {
+    if (typeof window !== "undefined") window.TWOSIDES_USER = deviceUser || "";
+  }, [deviceUser]);
+
+  const openAdminOnTaps = () => {
+    const now = Date.now();
+    const st = adminTapRef.current;
+    if (now - st.t > 1200) st.n = 0;
+    st.t = now; st.n += 1;
+    if (st.n >= 5) { st.n = 0; setUsageTick((x) => x + 1); setAdminOpen(true); }
+  };
+  const setDeviceUserPersist = (u) => {
+    setDeviceUser(u);
+    try { if (typeof window !== "undefined" && window.storage) window.storage.set("device-user", u); } catch (e) {}
+  };
+  const setCostPerCallPersist = (v) => {
+    const n = parseFloat(v);
+    const val = isNaN(n) || n < 0 ? 0 : n;
+    setCostPerCall(val);
+    try { if (typeof window !== "undefined" && window.storage) window.storage.set("cost-per-call", String(val)); } catch (e) {}
+  };
+  const readAiCount = (u) => {
+    try { return parseInt(window.localStorage.getItem("twosides:ai:" + u) || "0", 10) || 0; } catch (e) { return 0; }
+  };
 
   useEffect(() => {
     if (!loading && !deepLoading) return;
@@ -3495,8 +3555,122 @@ Respond with ONLY a minified JSON object in exactly this shape:
           }}
         >
           This is a research tool made with love, not financial advice. Stocks can go down as well as up — always make your own decisions (ideally from a beach chair).
-          <span style={{ display: "block", marginTop: 8, fontSize: 11, opacity: 0.7 }}>v40</span>
+          <span
+            onClick={openAdminOnTaps}
+            style={{ display: "block", marginTop: 8, fontSize: 11, opacity: 0.7, cursor: "default", userSelect: "none", WebkitUserSelect: "none" }}
+          >v40</span>
         </p>
+
+        {adminOpen && (
+          <div
+            onClick={() => setAdminOpen(false)}
+            style={{
+              position: "fixed", inset: 0, zIndex: 80, background: "rgba(20,40,48,0.7)",
+              display: "flex", alignItems: "flex-end", justifyContent: "center",
+              padding: "0 0 max(24px, env(safe-area-inset-bottom))",
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: "100%", maxWidth: 460, margin: "0 14px", maxHeight: "82vh", overflowY: "auto",
+                background: palette.white, borderRadius: 18, padding: "20px 20px 18px",
+                boxShadow: "0 16px 50px rgba(0,0,0,0.4)",
+              }}
+            >
+              <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 900, fontSize: 20, color: palette.oceanDark, marginBottom: 4 }}>
+                ⚙️ Usage &amp; fees
+              </div>
+              <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 13, color: palette.ink, opacity: 0.75, marginBottom: 14, lineHeight: 1.45 }}>
+                Private admin view. Counts the AI calls this device makes and estimates the API fee.
+              </div>
+
+              <div style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 13.5, color: palette.oceanDark, marginBottom: 6 }}>
+                This device is
+              </div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+                {["cal", "jane"].map((u) => (
+                  <button
+                    key={u}
+                    onClick={() => setDeviceUserPersist(u)}
+                    style={{
+                      fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 14,
+                      color: deviceUser === u ? palette.white : palette.oceanDark,
+                      background: deviceUser === u ? `linear-gradient(180deg, ${palette.ocean}, ${palette.oceanDark})` : "rgba(14,116,144,0.1)",
+                      border: `1.5px solid ${palette.ocean}`, borderRadius: 999, padding: "8px 20px", cursor: "pointer",
+                      textTransform: "capitalize",
+                    }}
+                  >
+                    {u}
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+                <span style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 13.5, color: palette.oceanDark }}>
+                  Est. cost per AI call $
+                </span>
+                <input
+                  value={costPerCall}
+                  onChange={(e) => setCostPerCallPersist(e.target.value)}
+                  inputMode="decimal"
+                  style={{
+                    width: 90, fontFamily: "'Outfit', sans-serif", fontSize: 14, padding: "8px 10px",
+                    borderRadius: 10, border: `2px solid ${palette.ocean}`, background: palette.white, color: palette.ink, outline: "none",
+                  }}
+                />
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+                {["cal", "jane"].map((u) => {
+                  const n = readAiCount(u) + (usageTick && 0);
+                  const cost = (n * (costPerCall || 0));
+                  const isThis = deviceUser === u;
+                  return (
+                    <div key={u} style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      background: isThis ? "rgba(14,116,144,0.08)" : "rgba(0,0,0,0.03)",
+                      border: `1.5px solid ${isThis ? palette.ocean : "rgba(0,0,0,0.08)"}`,
+                      borderRadius: 12, padding: "10px 14px",
+                    }}>
+                      <span style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 15, color: palette.oceanDark, textTransform: "capitalize" }}>
+                        {u}{isThis ? " (this device)" : ""}
+                      </span>
+                      <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 14, color: palette.ink }}>
+                        {n} calls · <strong>${cost.toFixed(2)}</strong>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 11.5, color: palette.ink, opacity: 0.6, marginBottom: 14, lineHeight: 1.45 }}>
+                Each device only counts its own user. Combined, token-exact totals across both people arrive with the worker update.
+              </div>
+
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap" }}>
+                <button
+                  onClick={() => { try { window.localStorage.removeItem("twosides:ai:" + (deviceUser || "unknown")); } catch (e) {} setUsageTick((x) => x + 1); }}
+                  style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 13, color: palette.coralDark, background: "transparent", border: "none", cursor: "pointer", padding: "10px 12px", marginRight: "auto" }}
+                >
+                  Reset this device
+                </button>
+                <button
+                  onClick={() => setUsageTick((x) => x + 1)}
+                  style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 13.5, color: palette.ink, background: "rgba(0,0,0,0.06)", border: "none", borderRadius: 999, padding: "10px 18px", cursor: "pointer" }}
+                >
+                  Refresh
+                </button>
+                <button
+                  onClick={() => setAdminOpen(false)}
+                  style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 800, fontSize: 13.5, color: palette.white, background: `linear-gradient(180deg, ${palette.ocean}, ${palette.oceanDark})`, border: "none", borderRadius: 999, padding: "10px 20px", cursor: "pointer" }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {reportImg && (
