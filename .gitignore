@@ -1,0 +1,5 @@
+# Build toolchain & intermediates (fetched/generated; not source)
+src/reactpkg/
+src/.tools/
+src/two-sides-standalone-v41.jsx
+src/app.compiled.js
