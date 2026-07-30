@@ -16,10 +16,59 @@ export default {
     if (url.pathname === "/ai" && request.method === "POST") {
       try {
         const body = await request.json();
-        return json(await askPerplexity(body, env), 200, cors);
+        const out = await askPerplexity(body, env);
+        // Per-user fee tracking: log this call's REAL token usage under the caller
+        // (body.u). One append-only KV key per call, so the ~5 parallel calls in a
+        // single analysis never clobber each other (no read-modify-write race).
+        if (env.USAGE) {
+          const u = String((body && body.u) || "").toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 24) || "unknown";
+          const usage = out.usage || {};
+          const pt = Number(usage.prompt_tokens) || 0;
+          const ct = Number(usage.completion_tokens) || 0;
+          const month = new Date().toISOString().slice(0, 7).replace("-", "");
+          const key = "ev:" + month + ":" + u + ":" + pt + ":" + ct + ":" + crypto.randomUUID();
+          ctx.waitUntil(env.USAGE.put(key, "1", { expirationTtl: 60 * 60 * 24 * 400 }));
+        }
+        return json(out, 200, cors);
       } catch (e) {
         return json({ error: String(e && e.message || e) }, 502, cors);
       }
+    }
+    // Per-user usage + estimated fees, aggregated from the append-only event log.
+    if (url.pathname === "/usage") {
+      if (!env.USAGE) return json({ error: "usage store not configured", users: {} }, 200, cors);
+      const month = (url.searchParams.get("month") || new Date().toISOString().slice(0, 7).replace("-", "")).replace(/[^0-9]/g, "");
+      const users = {};
+      let cursor;
+      try {
+        do {
+          const page = await env.USAGE.list({ prefix: "ev:" + month + ":", cursor, limit: 1000 });
+          for (const k of page.keys) {
+            // key shape: ev:<month>:<user>:<promptTokens>:<completionTokens>:<uuid>
+            const p = k.name.split(":");
+            const u = p[2] || "unknown";
+            const pt = parseInt(p[3] || "0", 10) || 0;
+            const ct = parseInt(p[4] || "0", 10) || 0;
+            if (!users[u]) users[u] = { calls: 0, promptTokens: 0, completionTokens: 0 };
+            users[u].calls += 1;
+            users[u].promptTokens += pt;
+            users[u].completionTokens += ct;
+          }
+          cursor = page.list_complete ? null : page.cursor;
+        } while (cursor);
+      } catch (e) {
+        return json({ error: String(e && e.message || e), users }, 200, cors);
+      }
+      // Rates are env vars so you can match Perplexity's current Sonar pricing
+      // without a code change. Defaults are placeholders — set the real numbers.
+      const inRate = parseFloat(env.PPX_INPUT_PER_M || "1");     // $ per 1M input tokens
+      const outRate = parseFloat(env.PPX_OUTPUT_PER_M || "1");   // $ per 1M output tokens
+      const reqFee = parseFloat(env.PPX_REQUEST_FEE || "0.005"); // $ per request (Sonar search fee)
+      for (const u in users) {
+        const x = users[u];
+        x.estCost = +(x.promptTokens / 1e6 * inRate + x.completionTokens / 1e6 * outRate + x.calls * reqFee).toFixed(4);
+      }
+      return json({ month, users, rates: { inRate, outRate, reqFee } }, 200, cors);
     }
     if (url.pathname === "/btc") {
       try {
@@ -297,7 +346,9 @@ async function askPerplexity(body, env) {
   }
   let text = (d.choices[0].message && d.choices[0].message.content) || "";
   text = text.replace(/\[\d+\]/g, ""); // strip [1][2] citation markers Sonar can add
-  return { text };
+  // Include Perplexity's token usage so the /ai route can record real per-user
+  // cost. The app ignores this field; it only reads `text`.
+  return { text, usage: d.usage || null };
 }
 
 // ---- Bitcoin price (free, no key, server-friendly) ----

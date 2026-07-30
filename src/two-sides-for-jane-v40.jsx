@@ -1638,6 +1638,7 @@ export default function App() {
   const [deviceUser, setDeviceUser] = useState(""); // "cal" | "jane" | ""
   const [costPerCall, setCostPerCall] = useState(0.006); // editable $ per AI call
   const [usageTick, setUsageTick] = useState(0); // bump to re-read local counts
+  const [remoteUsage, setRemoteUsage] = useState(null); // token-exact totals from the worker, once deployed
   const adminTapRef = useRef({ n: 0, t: 0 });
 
   // Load saved admin settings and wire the two globals the /ai calls use:
@@ -1672,6 +1673,24 @@ export default function App() {
   useEffect(() => {
     if (typeof window !== "undefined") window.TWOSIDES_USER = deviceUser || "";
   }, [deviceUser]);
+
+  // When the admin panel opens, try the worker's /usage endpoint for combined,
+  // token-exact per-user totals. Absent until the worker update is deployed —
+  // fail quietly and fall back to this device's local counts.
+  useEffect(() => {
+    if (!adminOpen) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`${PROXY}/usage`);
+        const d = await r.json();
+        if (!cancelled) setRemoteUsage(d && d.users ? d : null);
+      } catch (e) {
+        if (!cancelled) setRemoteUsage(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [adminOpen, usageTick]);
 
   const openAdminOnTaps = () => {
     const now = Date.now();
@@ -3644,9 +3663,30 @@ Respond with ONLY a minified JSON object in exactly this shape:
                 })}
               </div>
 
-              <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 11.5, color: palette.ink, opacity: 0.6, marginBottom: 14, lineHeight: 1.45 }}>
-                Each device only counts its own user. Combined, token-exact totals across both people arrive with the worker update.
-              </div>
+              {remoteUsage && remoteUsage.users ? (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 13.5, color: palette.oceanDark, margin: "4px 0 8px" }}>
+                    Combined · token-exact {remoteUsage.month ? "(" + remoteUsage.month + ")" : ""}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {["cal", "jane"].map((u) => {
+                      const x = (remoteUsage.users && remoteUsage.users[u]) || { calls: 0, estCost: 0 };
+                      return (
+                        <div key={u} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(20,102,63,0.08)", border: "1.5px solid rgba(20,102,63,0.35)", borderRadius: 12, padding: "10px 14px" }}>
+                          <span style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 15, color: palette.palm, textTransform: "capitalize" }}>{u}</span>
+                          <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 14, color: palette.ink }}>
+                            {(x.calls || 0)} calls · <strong>${Number(x.estCost || 0).toFixed(2)}</strong>
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 11.5, color: palette.ink, opacity: 0.6, marginBottom: 14, lineHeight: 1.45 }}>
+                  Each device only counts its own user. Combined, token-exact totals across both people arrive with the worker update.
+                </div>
+              )}
 
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap" }}>
                 <button

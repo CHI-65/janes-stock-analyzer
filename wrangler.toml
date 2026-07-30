@@ -1,0 +1,23 @@
+name = "two-sides-proxy"
+main = "src/worker.js"
+compatibility_date = "2024-11-01"
+account_id = "21c01debc72d4555fd6d5ad41dbfd4d2"
+
+# Per-user fee tracking store. Create it once (see DEPLOY_RUNBOOK.md) and paste
+# the returned id below. Until this binding exists, the worker runs exactly as
+# before and /usage just reports "not configured".
+[[kv_namespaces]]
+binding = "USAGE"
+id = "PASTE_KV_NAMESPACE_ID_HERE"
+
+# Perplexity Sonar pricing, so /usage can turn tokens into dollars. Set these to
+# match your current plan (these are placeholders). You can also use
+# `wrangler secret put` instead of committing them here.
+[vars]
+PPX_INPUT_PER_M = "1"      # $ per 1,000,000 input tokens
+PPX_OUTPUT_PER_M = "1"     # $ per 1,000,000 output tokens
+PPX_REQUEST_FEE = "0.005"  # $ per request (Sonar per-search fee)
+
+# NOTE: the API-key secrets (FINNHUB_KEY, MARKETDATA_KEY, PERPLEXITY_KEY) are
+# already set in the Cloudflare dashboard and persist across deploys — do not
+# add them here.
