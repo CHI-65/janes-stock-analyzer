@@ -273,10 +273,15 @@ function OptionsBar({ value }) {
   );
 }
 
-function MaxPainBox({ sym, getMaxPain }) {
+function MaxPainBox({ sym, getMaxPain, getWeeklyMaxPain }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  // Expandable weekly breakdown (next ~4 Friday expirations).
+  const [expanded, setExpanded] = useState(false);
+  const [weeks, setWeeks] = useState(null);
+  const [wLoading, setWLoading] = useState(false);
+  const [wError, setWError] = useState(false);
   const load = async () => {
     setLoading(true);
     setError(false);
@@ -290,8 +295,30 @@ function MaxPainBox({ sym, getMaxPain }) {
       setLoading(false);
     }
   };
+  const loadWeeks = async () => {
+    if (!getWeeklyMaxPain) return;
+    setWLoading(true);
+    setWError(false);
+    try {
+      const d = await getWeeklyMaxPain(sym);
+      const list = (d && Array.isArray(d.weeks) ? d.weeks : []).filter((w) => typeof w.maxPain === "number");
+      if (!list.length) throw new Error("no weeks");
+      setWeeks({ spot: typeof d.spot === "number" ? d.spot : (data && data.spot) || null, list });
+    } catch (e) {
+      setWError(true);
+    } finally {
+      setWLoading(false);
+    }
+  };
+  const toggleExpand = () => {
+    const next = !expanded;
+    setExpanded(next);
+    if (next && !weeks && !wLoading) loadWeeks();
+  };
   useEffect(() => {
     if (sym) load();
+    // Reset the weekly view whenever the ticker changes.
+    setExpanded(false); setWeeks(null); setWError(false);
   }, [sym]);
   if (error) return null;
   const spot = data && typeof data.spot === "number" ? data.spot : null;
@@ -373,7 +400,53 @@ function MaxPainBox({ sym, getMaxPain }) {
             <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 12, color: palette.ink, opacity: 0.6 }}>
               from current options positioning
             </span>
+            {getWeeklyMaxPain && (
+              <button
+                onClick={toggleExpand}
+                style={{
+                  fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 12.5, color: palette.oceanDark,
+                  background: "rgba(14,116,144,0.1)", border: `1.5px solid ${palette.ocean}`, borderRadius: 999,
+                  padding: "6px 14px", cursor: "pointer", marginLeft: "auto",
+                }}
+              >
+                {expanded ? "Hide weekly ▲" : "Expand · next 4 Fridays ▾"}
+              </button>
+            )}
           </div>
+
+          {expanded && (
+            <div style={{ marginTop: 12 }}>
+              {wLoading ? (
+                <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 13.5, color: palette.oceanDark, background: "rgba(255,255,255,0.7)", borderRadius: 10, padding: "12px 14px" }}>
+                  Crunching the weekly chains{"…"}
+                </div>
+              ) : wError ? (
+                <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 13, color: palette.coralDark, background: "rgba(255,255,255,0.7)", borderRadius: 10, padding: "12px 14px", lineHeight: 1.45 }}>
+                  Couldn{"’"}t load the weekly breakdown. {sym} may not have weekly options, or the data-server update isn{"’"}t live yet.
+                </div>
+              ) : weeks && weeks.list.length ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {weeks.list.map((w, i) => {
+                    let label = w.expiration;
+                    try { label = new Date(w.expiration + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }); } catch (e) {}
+                    return (
+                      <div key={w.expiration || i} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", background: "rgba(255,255,255,0.8)", borderRadius: 10, padding: "10px 14px", borderLeft: "4px solid #D9A400" }}>
+                        <span style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 600, fontSize: 13.5, color: palette.ink }}>
+                          {label}{i === 0 ? " · this week" : ""}
+                        </span>
+                        <span style={{ fontFamily: "'Fraunces', serif", fontWeight: 900, fontSize: 18, color: palette.oceanDark }}>
+                          ${w.maxPain}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 11.5, color: palette.ink, opacity: 0.6, marginTop: 2 }}>
+                    Max pain per weekly expiration{weeks.spot != null ? ` · ${sym} ~$${weeks.spot.toFixed(2)} now` : ""}
+                  </span>
+                </div>
+              ) : null}
+            </div>
+          )}
         </div>
       ) : null}
     </div>
@@ -2161,6 +2234,16 @@ export default function App() {
     return await callClaude(prompt, true);
   };
 
+  // Max pain for the next few WEEKLY option expirations (the expandable view).
+  // Goes to the worker's /maxpain?depth=weekly, which computes one figure per
+  // upcoming Friday from the live options chain.
+  const getWeeklyMaxPain = async (sym) => {
+    const r = await fetch(`${PROXY}/maxpain?ticker=${encodeURIComponent(sym)}&depth=weekly`);
+    const d = await r.json();
+    if (!d || !Array.isArray(d.weeks) || !d.weeks.length) throw new Error("no weekly max pain");
+    return d;
+  };
+
   const STYLE_RULES = `Write for a smart general reader with no finance background; whenever a financial term is unavoidable, explain it in everyday words in the same sentence. Include concrete specifics - recent numbers, dates, names of products or events - wherever you can. Respond with ONLY a minified single-line JSON object: no markdown fences, no preamble, no citations. Output nothing but the JSON.`;
 
   const bullPrompt = (sym, useSearch) =>
@@ -2839,7 +2922,7 @@ Respond with ONLY a minified JSON object in exactly this shape:
                 </div>
               )}
 
-              <MaxPainBox sym={deepData.sym} getMaxPain={getMaxPain} />
+              <MaxPainBox sym={deepData.sym} getMaxPain={getMaxPain} getWeeklyMaxPain={getWeeklyMaxPain} />
 
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 26 }}>
                 <CaseCard

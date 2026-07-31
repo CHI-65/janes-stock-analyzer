@@ -143,7 +143,7 @@ NEW_DATA = '''  // Hard numbers come straight from the real feeds (Finnhub / Mar
 s = repl(OLD_DATA, NEW_DATA, "data helpers")
 
 # 5) footer version
-s = repl(">v40</span>", ">v56</span>", "footer version")
+s = repl(">v40</span>", ">v57</span>", "footer version")
 
 # 6) render the app ourselves (artifact runtime used to do this), with a
 #    safety net so a failure shows a message + reload instead of a blank page.

@@ -45,6 +45,17 @@ token-exact** rows appear.
 - `/usage` sums the current month's keys per user and multiplies tokens by the
   rate vars to produce `estCost`. Keys auto-expire after ~13 months.
 
+## Also included in this deploy
+`src/worker.js` also adds **`/maxpain?depth=weekly`** — max pain for the next ~4
+weekly (Friday) option expirations, powering the **Expand** button on the deep
+dive's Max pain card. Until deployed, that button shows a friendly "not live
+yet" note. Verify after deploy:
+
+```bash
+curl "https://two-sides-proxy.calharrisinc.workers.dev/maxpain?ticker=AAPL&depth=weekly"
+# -> {"ticker":"AAPL","spot":...,"weeks":[{"expiration":"YYYY-MM-DD","maxPain":...}, ...]}
+```
+
 ## Safe to deploy
 Until the `USAGE` binding exists the worker behaves exactly as today, and
 `/usage` simply returns `"usage store not configured"`. The API-key secrets

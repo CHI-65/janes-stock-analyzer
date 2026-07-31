@@ -171,7 +171,11 @@ export default {
         return json(await getCard(ticker, env), 200, cors);
       }
       if (url.pathname === "/maxpain") {
-        const depth = url.searchParams.get("depth") === "deep" ? "deep" : "quick";
+        const depthParam = url.searchParams.get("depth");
+        if (depthParam === "weekly") {
+          return json(await getWeeklyMaxPain(ticker, env), 200, cors);
+        }
+        const depth = depthParam === "deep" ? "deep" : "quick";
         return json(await getMaxPain(ticker, depth, env), 200, cors);
       }
       return json({ error: "not found" }, 404, cors);
@@ -498,6 +502,37 @@ function computeMaxPain(rows) {
     if (pain < bestPain) { bestPain = pain; best = S; }
   }
   return { maxPain: best, strikesConsidered: strikes.length };
+}
+
+// Max pain for the next several WEEKLY expirations (the app's "Expand" view).
+// Pull option chains around weekly dte offsets, dedup by actual expiration, then
+// compute one max pain per expiration. dte=1 (not 0) reliably captures the
+// nearest Friday without tripping MarketData's already-expired guard.
+async function getWeeklyMaxPain(ticker, env) {
+  const targets = [1, 8, 15, 22, 29];
+  const byExp = {};
+  for (const t of targets) {
+    let batch;
+    try { batch = await fetchChainByDte(ticker, t, 40, env); }
+    catch (e) { batch = []; }
+    for (const x of batch) {
+      if (!byExp[x.exp]) byExp[x.exp] = [];
+      byExp[x.exp].push(x);
+    }
+  }
+  const exps = Object.keys(byExp).map(Number).sort((a, b) => a - b).slice(0, 4);
+  if (!exps.length) throw new Error("no live weekly expirations for " + ticker);
+  let spot = null;
+  try { spot = (await getQuote(ticker, env)).price; } catch (e) {}
+  const weeks = exps.map((e) => {
+    const mp = computeMaxPain(byExp[e]);
+    return {
+      expiration: new Date(e * 1000).toISOString().slice(0, 10),
+      maxPain: mp.maxPain,
+      strikesConsidered: mp.strikesConsidered,
+    };
+  });
+  return { ticker, spot, weeks };
 }
 
 async function getMaxPain(ticker, depth, env) {
