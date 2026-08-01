@@ -4,6 +4,34 @@ The app side already ships (tap the footer version 5× → **Usage & fees**). Th
 one-time worker deploy adds **token-exact** cost and a **combined Cal + Jane**
 view (the app's admin panel lights up automatically once this is live).
 
+## The easy way — `./src/deploy_worker.sh` (no node, no wrangler, no browser)
+
+This Mac has no node, and browser automation is flaky, so the normal path is a
+single script that calls the Cloudflare REST API with `curl`. It creates the
+`USAGE` KV namespace if it's missing, uploads `src/worker.js` with the right
+bindings, **keeps the existing API-key secrets**, and verifies both endpoints.
+
+**One-time setup** — create an API token at
+<https://dash.cloudflare.com/profile/api-tokens> → **Create Token** → use the
+**"Edit Cloudflare Workers"** template (it grants exactly `Workers Scripts:Edit`
++ `Workers KV Storage:Edit`). Copy it, then:
+
+```bash
+mkdir -p ~/.config/jsa && chmod 700 ~/.config/jsa
+pbpaste > ~/.config/jsa/cloudflare_token && chmod 600 ~/.config/jsa/cloudflare_token
+```
+
+**Every deploy after that — this is the whole thing:**
+
+```bash
+cd ~/Projects/janes-stock-analyzer && ./src/deploy_worker.sh
+```
+
+The token is read from that file (or from `$CLOUDFLARE_API_TOKEN`) and is never
+committed. Everything below is the older wrangler route, kept for reference.
+
+## The wrangler way (needs node/npm — this Mac has neither)
+
 You need: Node/npm on your machine, and access to the Cloudflare account that
 owns `two-sides-proxy` (account id `21c01debc72d4555fd6d5ad41dbfd4d2`).
 
