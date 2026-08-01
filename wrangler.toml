@@ -8,7 +8,7 @@ account_id = "21c01debc72d4555fd6d5ad41dbfd4d2"
 # before and /usage just reports "not configured".
 [[kv_namespaces]]
 binding = "USAGE"
-id = "PASTE_KV_NAMESPACE_ID_HERE"
+id = "2e648419442a435cb375695c40e80afc"
 
 # Perplexity Sonar pricing, so /usage can turn tokens into dollars. Set these to
 # match your current plan (these are placeholders). You can also use
