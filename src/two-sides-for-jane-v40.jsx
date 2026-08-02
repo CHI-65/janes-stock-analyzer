@@ -755,12 +755,15 @@ function WatchlistScreen({ favs, onPick, onBack, onAdd, onRemove, onAsk, getCard
   // Before the opening bell the extended session is pre-market; every other hour
   // it's after-hours. Yahoo's own market state decides, so the button offers PRE
   // in the morning and AFT the rest of the time — and defaults to whichever one
-  // is live right now (pre-market) or to the close (everything else).
+  // is live right now (pre-market) or to the close (everything else). While the
+  // market is actually open there's nothing to switch to (the regular price IS
+  // the live one), so the button greys out until the closing bell.
   const marketState = (favs || []).reduce((found, s) => found || (cards[s] && cards[s].marketState) || null, null);
   const isPre = marketState === "PRE";
+  const isOpen = marketState === "REGULAR";
   const extLeg = isPre ? "pre" : "post";
   const extLabel = isPre ? "PRE" : "AFT";
-  const mode = priceMode || (isPre ? "ext" : "mc");
+  const mode = isOpen ? "mc" : priceMode || (isPre ? "ext" : "mc");
   // Swap in whichever leg the toggle is on. Done before sorting so "Price" and
   // "% Chg" sort on what's actually on screen. A ticker with no extended-session
   // print (thinly traded, or the Finnhub fallback filled the row) says so rather
@@ -882,13 +885,18 @@ function WatchlistScreen({ favs, onPick, onBack, onAdd, onRemove, onAsk, getCard
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button
               onClick={() => setPriceMode(mode === "ext" ? "mc" : "ext")}
+              disabled={isOpen}
               aria-label={
-                mode === "ext"
+                isOpen
+                  ? "The market is open, so these prices are live. The pre-market and after-hours toggle comes back outside trading hours."
+                  : mode === "ext"
                   ? `Showing ${isPre ? "pre-market" : "after-hours"} prices. Tap for market close prices.`
                   : `Showing market close prices. Tap for ${isPre ? "pre-market" : "after-hours"} prices.`
               }
               title={
-                mode === "ext"
+                isOpen
+                  ? "Market is open — these prices are live"
+                  : mode === "ext"
                   ? `Showing ${isPre ? "pre-market" : "after-hours"} prices — tap for the market close`
                   : `Showing market close prices — tap for ${isPre ? "pre-market" : "after-hours"}`
               }
@@ -897,13 +905,14 @@ function WatchlistScreen({ favs, onPick, onBack, onAdd, onRemove, onAsk, getCard
                 fontWeight: 800,
                 fontSize: 12.5,
                 letterSpacing: "0.04em",
-                color: mode === "ext" ? palette.white : palette.oceanDark,
-                background: mode === "ext" ? (isPre ? "#B45309" : "#6D28D9") : "rgba(255,255,255,0.85)",
-                border: `2px solid ${mode === "ext" ? (isPre ? "#B45309" : "#6D28D9") : palette.ocean}`,
+                color: isOpen ? palette.ink : mode === "ext" ? palette.white : palette.oceanDark,
+                background: isOpen ? "rgba(255,255,255,0.55)" : mode === "ext" ? (isPre ? "#B45309" : "#6D28D9") : "rgba(255,255,255,0.85)",
+                border: `2px solid ${isOpen ? "#9DB8C0" : mode === "ext" ? (isPre ? "#B45309" : "#6D28D9") : palette.ocean}`,
                 borderRadius: 999,
                 height: 38,
                 padding: "0 13px",
-                cursor: "pointer",
+                cursor: isOpen ? "default" : "pointer",
+                opacity: isOpen ? 0.45 : 1,
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
