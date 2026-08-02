@@ -638,6 +638,13 @@ function WatchRow({ item, onPick, onRemove, reorderable, isReordering, onReorder
             </>
           ) : item.gold ? (
             <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 12, fontWeight: 700, color: "#8a5a00" }}>tap {"›"}</span>
+          ) : item.noAft ? (
+            <span
+              style={{ fontFamily: "'Outfit', sans-serif", fontSize: 11.5, fontWeight: 700, color: "#5B21B6", opacity: 0.75 }}
+              title="This one didn't trade after hours"
+            >
+              no after-hours
+            </span>
           ) : (
             <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 12, color: palette.ink, opacity: 0.5 }}>{"—"}</span>
           )}
@@ -663,6 +670,9 @@ function WatchlistScreen({ favs, onPick, onBack, onAdd, onRemove, onAsk, getCard
   const [sortKey, setSortKey] = useState("order");
   const [sortAsc, setSortAsc] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // Which price each row shows: "mc" = the 4pm market close, "aft" = the
+  // after-hours print. The worker sends both legs, so flipping this is instant.
+  const [priceMode, setPriceMode] = useState("mc");
   const loadSeq = useRef(0);
   const applyCards = (list) => {
     const byTicker = {};
@@ -735,7 +745,22 @@ function WatchlistScreen({ favs, onPick, onBack, onAdd, onRemove, onAsk, getCard
     if (k === sortKey) setSortAsc((v) => !v);
     else { setSortKey(k); setSortAsc(k === "ticker"); }
   };
-  let ordered = (favs || []).map((s) => cards[s] || { ticker: s, loading: true });
+  // Swap in whichever leg the MC/AFT toggle is on. Done before sorting so "Price"
+  // and "% Chg" sort on what's actually on screen. A ticker with no after-hours
+  // print (thinly traded, or the Finnhub fallback filled the row) shows a dash
+  // rather than quietly falling back to the close and looking like a real AFT price.
+  const inMode = (c) => {
+    if (!c || c.loading || c.gold) return c;
+    if (priceMode === "aft") {
+      if (!c.post || typeof c.post.price !== "number") return { ...c, price: null, change: null, changePct: null, session: "post", noAft: true };
+      // change (dollars) stays null: it's the regular-session figure, and the
+      // up/down arrow would point the wrong way if the after-hours % is missing.
+      return { ...c, price: c.post.price, change: null, changePct: c.post.changePct, session: "post" };
+    }
+    if (!c.regular || typeof c.regular.price !== "number") return { ...c, session: "regular" };
+    return { ...c, price: c.regular.price, changePct: c.regular.changePct, session: "regular" };
+  };
+  let ordered = (favs || []).map((s) => inMode(cards[s] || { ticker: s, loading: true }));
   if (sortKey !== "order") {
     ordered = ordered.slice().sort((a, b) => {
       if (sortKey === "ticker") {
@@ -797,7 +822,7 @@ function WatchlistScreen({ favs, onPick, onBack, onAdd, onRemove, onAsk, getCard
   };
   const reorderable = sortKey === "order";
   let renderList = ordered;
-  if (dragTicker && dragOrder) renderList = dragOrder.map((s) => cards[s] || { ticker: s, loading: true });
+  if (dragTicker && dragOrder) renderList = dragOrder.map((s) => inMode(cards[s] || { ticker: s, loading: true }));
   return (
     <div
       className="screen screen-analyzer"
@@ -837,6 +862,29 @@ function WatchlistScreen({ favs, onPick, onBack, onAdd, onRemove, onAsk, getCard
             {"📋"} Watchlist
           </h1>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              onClick={() => setPriceMode((m) => (m === "mc" ? "aft" : "mc"))}
+              aria-label={priceMode === "aft" ? "Showing after-hours prices. Tap for market close prices." : "Showing market close prices. Tap for after-hours prices."}
+              title={priceMode === "aft" ? "Showing after-hours prices — tap for the market close" : "Showing market close prices — tap for after-hours"}
+              style={{
+                fontFamily: "'Outfit', sans-serif",
+                fontWeight: 800,
+                fontSize: 12.5,
+                letterSpacing: "0.04em",
+                color: priceMode === "aft" ? palette.white : palette.oceanDark,
+                background: priceMode === "aft" ? "#6D28D9" : "rgba(255,255,255,0.85)",
+                border: `2px solid ${priceMode === "aft" ? "#6D28D9" : palette.ocean}`,
+                borderRadius: 999,
+                height: 38,
+                padding: "0 13px",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {priceMode === "aft" ? "AFT" : "MC"}
+            </button>
             <button
               onClick={() => loadAll(true)}
               disabled={refreshing}
@@ -883,6 +931,24 @@ function WatchlistScreen({ favs, onPick, onBack, onAdd, onRemove, onAsk, getCard
             )}
           </div>
         </div>
+        {priceMode === "aft" && (
+          <div
+            style={{
+              fontFamily: "'Outfit', sans-serif",
+              fontSize: 12.5,
+              fontWeight: 600,
+              color: "#5B21B6",
+              background: "#EDE9FE",
+              border: "1px solid #C4B5FD",
+              borderRadius: 10,
+              padding: "6px 10px",
+              marginBottom: 10,
+              lineHeight: 1.35,
+            }}
+          >
+            Showing after-hours prices. The % is the move since the 4pm close. Tap {"AFT"} again for closing prices.
+          </div>
+        )}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: hint ? 8 : 10 }}>
           <input
             value={entry}
