@@ -459,8 +459,13 @@ function WatchRow({ item, onPick, onRemove, reorderable, isReordering, onReorder
   const startX = useRef(null);
   const moved = useRef(false);
   const canSwipe = !!onRemove && !item.gold;
-  const up = typeof item.changePct === "number" ? item.changePct >= 0 : (typeof item.change === "number" ? item.change >= 0 : null);
-  const changeColor = up == null ? palette.ink : up ? palette.palm : palette.red;
+  // Judge up/down on the ROUNDED figure, so a hair below zero doesn't render as
+  // a red "▼-0.00%" — common on quiet after-hours moves.
+  const pctDigits = item.gold ? 1 : 2;
+  const pct = typeof item.changePct === "number" ? Number(item.changePct.toFixed(pctDigits)) : null;
+  const flat = pct === 0;
+  const up = pct != null ? pct >= 0 : (typeof item.change === "number" ? item.change >= 0 : null);
+  const changeColor = up == null || flat ? palette.ink : up ? palette.palm : palette.red;
   const priceText =
     typeof item.price === "number"
       ? item.gold
@@ -630,9 +635,9 @@ function WatchRow({ item, onPick, onRemove, reorderable, isReordering, onReorder
               <span style={{ fontFamily: "'Fraunces', serif", fontWeight: 900, fontSize: 14, color: item.gold ? palette.oceanDark : palette.ink }}>
                 {priceText}
               </span>
-              {typeof item.changePct === "number" && (
-                <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 11.5, fontWeight: 700, color: changeColor, minWidth: 50, textAlign: "right" }}>
-                  {up ? "▲" : "▼"}{(item.changePct >= 0 ? "+" : "") + item.changePct.toFixed(item.gold ? 1 : 2) + "%"}
+              {pct != null && (
+                <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 11.5, fontWeight: 700, color: changeColor, minWidth: 50, textAlign: "right", opacity: flat ? 0.65 : 1 }}>
+                  {flat ? "" : up ? "▲" : "▼"}{(pct > 0 ? "+" : "") + pct.toFixed(pctDigits) + "%"}
                 </span>
               )}
             </>
