@@ -110,8 +110,11 @@ export default {
             changePct: q ? q.changePct : null,
             session: q ? (q.session || "regular") : null,
             asOf: q ? q.asOf : null,
-            // Both legs, when Yahoo has them, for the MC/AFT toggle. The Finnhub
-            // fallback has neither, and the toggle falls back to the single price.
+            // Every leg Yahoo has, plus the market state, for the price toggle.
+            // The Finnhub fallback has none of it, and the toggle then falls
+            // back to the single regular-session price it does return.
+            marketState: (q && q.marketState) || null,
+            pre: (q && q.pre) || null,
             regular: (q && q.regular) || null,
             post: (q && q.post) || null,
           });
@@ -258,8 +261,9 @@ async function getYahooQuotesBatch(tickers) {
       } else if (typeof q.regularMarketPrice === "number") {
         price = q.regularMarketPrice; changePct = q.regularMarketChangePercent; session = "regular"; t = q.regularMarketTime;
       }
-      // Also hand back the regular-close and after-hours figures side by side, so
-      // the watchlist's MC/AFT toggle can switch between them without refetching.
+      // Also hand back all three legs side by side plus the raw market state, so
+      // the watchlist's toggle can offer whichever extended session is current
+      // (PRE before the open, AFT after it) without refetching.
       const leg = (p, pct, ts) =>
         typeof p === "number"
           ? { price: p, changePct: typeof pct === "number" ? pct : null, asOf: ts ? new Date(ts * 1000).toISOString() : null }
@@ -273,6 +277,8 @@ async function getYahooQuotesBatch(tickers) {
           session,
           asOf: t ? new Date(t * 1000).toISOString() : null,
           source: "yahoo-q",
+          marketState: state,
+          pre: leg(q.preMarketPrice, q.preMarketChangePercent, q.preMarketTime),
           regular: leg(q.regularMarketPrice, q.regularMarketChangePercent, q.regularMarketTime),
           post: leg(q.postMarketPrice, q.postMarketChangePercent, q.postMarketTime),
         };

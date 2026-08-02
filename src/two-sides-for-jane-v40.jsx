@@ -643,12 +643,12 @@ function WatchRow({ item, onPick, onRemove, reorderable, isReordering, onReorder
             </>
           ) : item.gold ? (
             <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 12, fontWeight: 700, color: "#8a5a00" }}>tap {"›"}</span>
-          ) : item.noAft ? (
+          ) : item.extNote ? (
             <span
-              style={{ fontFamily: "'Outfit', sans-serif", fontSize: 11.5, fontWeight: 700, color: "#5B21B6", opacity: 0.75 }}
-              title="This one didn't trade after hours"
+              style={{ fontFamily: "'Outfit', sans-serif", fontSize: 11.5, fontWeight: 700, color: item.session === "pre" ? "#92400E" : "#5B21B6", opacity: 0.8 }}
+              title={item.session === "pre" ? "This one hasn't traded pre-market" : "This one didn't trade after hours"}
             >
-              no after-hours
+              {item.extNote}
             </span>
           ) : (
             <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 12, color: palette.ink, opacity: 0.5 }}>{"—"}</span>
@@ -675,9 +675,11 @@ function WatchlistScreen({ favs, onPick, onBack, onAdd, onRemove, onAsk, getCard
   const [sortKey, setSortKey] = useState("order");
   const [sortAsc, setSortAsc] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  // Which price each row shows: "mc" = the 4pm market close, "aft" = the
-  // after-hours print. The worker sends both legs, so flipping this is instant.
-  const [priceMode, setPriceMode] = useState("mc");
+  // Which price each row shows: "mc" = the market close, "ext" = the extended
+  // session. Which extended session that is depends on the clock: before the
+  // open it's pre-market, the rest of the time it's after-hours. null means
+  // "follow the session default", until Jane taps the button herself.
+  const [priceMode, setPriceMode] = useState(null);
   const loadSeq = useRef(0);
   const applyCards = (list) => {
     const byTicker = {};
@@ -750,17 +752,28 @@ function WatchlistScreen({ favs, onPick, onBack, onAdd, onRemove, onAsk, getCard
     if (k === sortKey) setSortAsc((v) => !v);
     else { setSortKey(k); setSortAsc(k === "ticker"); }
   };
-  // Swap in whichever leg the MC/AFT toggle is on. Done before sorting so "Price"
-  // and "% Chg" sort on what's actually on screen. A ticker with no after-hours
-  // print (thinly traded, or the Finnhub fallback filled the row) shows a dash
-  // rather than quietly falling back to the close and looking like a real AFT price.
+  // Before the opening bell the extended session is pre-market; every other hour
+  // it's after-hours. Yahoo's own market state decides, so the button offers PRE
+  // in the morning and AFT the rest of the time — and defaults to whichever one
+  // is live right now (pre-market) or to the close (everything else).
+  const marketState = (favs || []).reduce((found, s) => found || (cards[s] && cards[s].marketState) || null, null);
+  const isPre = marketState === "PRE";
+  const extLeg = isPre ? "pre" : "post";
+  const extLabel = isPre ? "PRE" : "AFT";
+  const mode = priceMode || (isPre ? "ext" : "mc");
+  // Swap in whichever leg the toggle is on. Done before sorting so "Price" and
+  // "% Chg" sort on what's actually on screen. A ticker with no extended-session
+  // print (thinly traded, or the Finnhub fallback filled the row) says so rather
+  // than quietly falling back to the close and looking like a real PRE/AFT price.
   const inMode = (c) => {
     if (!c || c.loading || c.gold) return c;
-    if (priceMode === "aft") {
-      if (!c.post || typeof c.post.price !== "number") return { ...c, price: null, change: null, changePct: null, session: "post", noAft: true };
+    if (mode === "ext") {
+      const src = extLeg === "pre" ? c.pre : c.post;
+      const note = isPre ? "no pre-market" : "no after-hours";
+      if (!src || typeof src.price !== "number") return { ...c, price: null, change: null, changePct: null, session: extLeg, extNote: note };
       // change (dollars) stays null: it's the regular-session figure, and the
-      // up/down arrow would point the wrong way if the after-hours % is missing.
-      return { ...c, price: c.post.price, change: null, changePct: c.post.changePct, session: "post" };
+      // up/down arrow would point the wrong way if the extended % is missing.
+      return { ...c, price: src.price, change: null, changePct: src.changePct, session: extLeg };
     }
     if (!c.regular || typeof c.regular.price !== "number") return { ...c, session: "regular" };
     return { ...c, price: c.regular.price, changePct: c.regular.changePct, session: "regular" };
@@ -868,17 +881,25 @@ function WatchlistScreen({ favs, onPick, onBack, onAdd, onRemove, onAsk, getCard
           </h1>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button
-              onClick={() => setPriceMode((m) => (m === "mc" ? "aft" : "mc"))}
-              aria-label={priceMode === "aft" ? "Showing after-hours prices. Tap for market close prices." : "Showing market close prices. Tap for after-hours prices."}
-              title={priceMode === "aft" ? "Showing after-hours prices — tap for the market close" : "Showing market close prices — tap for after-hours"}
+              onClick={() => setPriceMode(mode === "ext" ? "mc" : "ext")}
+              aria-label={
+                mode === "ext"
+                  ? `Showing ${isPre ? "pre-market" : "after-hours"} prices. Tap for market close prices.`
+                  : `Showing market close prices. Tap for ${isPre ? "pre-market" : "after-hours"} prices.`
+              }
+              title={
+                mode === "ext"
+                  ? `Showing ${isPre ? "pre-market" : "after-hours"} prices — tap for the market close`
+                  : `Showing market close prices — tap for ${isPre ? "pre-market" : "after-hours"}`
+              }
               style={{
                 fontFamily: "'Outfit', sans-serif",
                 fontWeight: 800,
                 fontSize: 12.5,
                 letterSpacing: "0.04em",
-                color: priceMode === "aft" ? palette.white : palette.oceanDark,
-                background: priceMode === "aft" ? "#6D28D9" : "rgba(255,255,255,0.85)",
-                border: `2px solid ${priceMode === "aft" ? "#6D28D9" : palette.ocean}`,
+                color: mode === "ext" ? palette.white : palette.oceanDark,
+                background: mode === "ext" ? (isPre ? "#B45309" : "#6D28D9") : "rgba(255,255,255,0.85)",
+                border: `2px solid ${mode === "ext" ? (isPre ? "#B45309" : "#6D28D9") : palette.ocean}`,
                 borderRadius: 999,
                 height: 38,
                 padding: "0 13px",
@@ -888,7 +909,7 @@ function WatchlistScreen({ favs, onPick, onBack, onAdd, onRemove, onAsk, getCard
                 justifyContent: "center",
               }}
             >
-              {priceMode === "aft" ? "AFT" : "MC"}
+              {mode === "ext" ? extLabel : "MC"}
             </button>
             <button
               onClick={() => loadAll(true)}
@@ -936,22 +957,24 @@ function WatchlistScreen({ favs, onPick, onBack, onAdd, onRemove, onAsk, getCard
             )}
           </div>
         </div>
-        {priceMode === "aft" && (
+        {mode === "ext" && (
           <div
             style={{
               fontFamily: "'Outfit', sans-serif",
               fontSize: 12.5,
               fontWeight: 600,
-              color: "#5B21B6",
-              background: "#EDE9FE",
-              border: "1px solid #C4B5FD",
+              color: isPre ? "#92400E" : "#5B21B6",
+              background: isPre ? "#FEF3C7" : "#EDE9FE",
+              border: `1px solid ${isPre ? "#FCD34D" : "#C4B5FD"}`,
               borderRadius: 10,
               padding: "6px 10px",
               marginBottom: 10,
               lineHeight: 1.35,
             }}
           >
-            Showing after-hours prices. The % is the move since the 4pm close. Tap {"AFT"} again for closing prices.
+            {isPre
+              ? `Showing pre-market prices, before today's 9:30am open. The % is the move since yesterday's close. Tap PRE for closing prices.`
+              : `Showing after-hours prices. The % is the move since the 4pm close. Tap AFT for closing prices.`}
           </div>
         )}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: hint ? 8 : 10 }}>
