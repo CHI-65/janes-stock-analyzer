@@ -147,9 +147,11 @@ export default {
               pre: q.preMarketPrice, prePct: q.preMarketChangePercent,
               post: q.postMarketPrice, postPct: q.postMarketChangePercent,
             };
-            // Every price/session-ish field Yahoo actually sends, so we can see at
-            // a glance whether a new session (e.g. overnight) ever shows up here.
-            out.v7keys = Object.keys(q).filter((k) => /price|market|session|hours|night|extend/i.test(k)).sort();
+            // EVERY key Yahoo sends, unfiltered — the only way to be sure a new
+            // session (e.g. overnight) isn't hiding under a name we didn't guess.
+            out.v7keys = Object.keys(q).sort();
+            out.v7night = {};
+            Object.keys(q).forEach((k) => { if (/night|extend|blue|ocean|24/i.test(k)) out.v7night[k] = q[k]; });
           } else {
             out.v7raw = JSON.stringify(d).slice(0, 300);
           }
@@ -185,6 +187,39 @@ export default {
           out.v8span = days;
         }
       } catch (e) { out.v8err = String(e && e.message || e); }
+      // Does Yahoo's own quote PAGE show an overnight print the JSON API omits?
+      try {
+        const r = await fetch("https://finance.yahoo.com/quote/" + tk + "/", {
+          headers: { "User-Agent": YUA, Accept: "text/html" },
+        });
+        out.htmlStatus = r.status;
+        const html = await r.text();
+        out.htmlHasOvernight = /overnight/i.test(html);
+        // Look for a DATA shape, not the feature-flag list: a price field or a
+        // market-state value that names the overnight session.
+        const pats = {
+          overnightMarketField: /"?overnightMarket[A-Za-z]*"?\s*:/gi,
+          overnightPriceKey: /"[a-z]*overnight[a-z]*(price|time|change)[a-z]*"/gi,
+          marketStateOvernight: /"marketState"\s*:\s*"([A-Z]+)"/gi,
+          overnightLabel: /Overnight[^"<]{0,40}/g,
+        };
+        out.htmlPatterns = {};
+        Object.keys(pats).forEach((k) => {
+          const found = [];
+          let m;
+          while ((m = pats[k].exec(html)) && found.length < 6) found.push(m[0].slice(0, 120));
+          out.htmlPatterns[k] = found;
+        });
+        // Plain slicing around the label — a backtracking regex over a 2 MB page
+        // burns the worker's CPU budget.
+        const ctx2 = [];
+        let at = html.indexOf("Overnight:");
+        while (at !== -1 && ctx2.length < 3) {
+          ctx2.push(html.slice(Math.max(0, at - 2400), at + 400).replace(/<[^>]*>/g, " ").replace(/\s+/g, " "));
+          at = html.indexOf("Overnight:", at + 1);
+        }
+        out.htmlOvernightContext = ctx2;
+      } catch (e) { out.htmlErr = String(e && e.message || e); }
       return json(out, 200, cors);
     }
     if (!ticker) return json({ error: "missing ticker" }, 400, cors);
