@@ -147,6 +147,9 @@ export default {
               pre: q.preMarketPrice, prePct: q.preMarketChangePercent,
               post: q.postMarketPrice, postPct: q.postMarketChangePercent,
             };
+            // Every price/session-ish field Yahoo actually sends, so we can see at
+            // a glance whether a new session (e.g. overnight) ever shows up here.
+            out.v7keys = Object.keys(q).filter((k) => /price|market|session|hours|night|extend/i.test(k)).sort();
           } else {
             out.v7raw = JSON.stringify(d).slice(0, 300);
           }
@@ -155,13 +158,32 @@ export default {
       try {
         const r = await fetch(
           "https://query1.finance.yahoo.com/v8/finance/chart/" + tk +
-            "?interval=2m&range=1d&includePrePost=true",
+            "?interval=1m&range=5d&includePrePost=true",
           { headers: { "User-Agent": YUA, Accept: "application/json" } }
         );
         out.v8status = r.status;
         const d = await r.json();
-        const m = d && d.chart && d.chart.result && d.chart.result[0] && d.chart.result[0].meta;
+        const res = d && d.chart && d.chart.result && d.chart.result[0];
+        const m = res && res.meta;
         out.v8meta = m ? { regularMarketPrice: m.regularMarketPrice, prevClose: m.chartPreviousClose, ctp: m.currentTradingPeriod } : null;
+        // How far either side of the regular session do real prints actually go?
+        // If an overnight session (20:00-04:00 ET) were in this feed, some day
+        // would show a first/last outside the 04:00-20:00 extended window.
+        if (res && res.timestamp) {
+          const closes = (res.indicators && res.indicators.quote && res.indicators.quote[0] && res.indicators.quote[0].close) || [];
+          const days = {};
+          res.timestamp.forEach((t, i) => {
+            if (closes[i] == null) return;
+            const et = new Date((t - 4 * 3600) * 1000); // ET = UTC-4 in summer
+            const day = et.toISOString().slice(0, 10);
+            const hhmm = et.toISOString().slice(11, 16);
+            if (!days[day]) days[day] = { first: hhmm, last: hhmm, n: 0 };
+            if (hhmm < days[day].first) days[day].first = hhmm;
+            if (hhmm > days[day].last) days[day].last = hhmm;
+            days[day].n++;
+          });
+          out.v8span = days;
+        }
       } catch (e) { out.v8err = String(e && e.message || e); }
       return json(out, 200, cors);
     }
