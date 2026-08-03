@@ -211,7 +211,44 @@ export default {
       if (url.pathname === "/card") {
         return json(await getCard(ticker, env), 200, cors);
       }
+      // Which expirations are actually listed right now (MarketData's own list,
+      // so "is there one expiring today?" is answered by the venue, not by us
+      // guessing from a day count).
+      if (url.pathname === "/expirations") {
+        const r = await fetch(`https://api.marketdata.app/v1/options/expirations/${ticker}/`, {
+          headers: { Authorization: `Bearer ${env.MARKETDATA_KEY}` },
+        });
+        const raw = await r.text();
+        let d = null;
+        try { d = JSON.parse(raw); } catch (e) {}
+        return json({ ticker, http: r.status, expirations: (d && d.expirations) || [], status: d && d.s, raw: d ? undefined : raw.slice(0, 300) }, 200, cors);
+      }
       if (url.pathname === "/maxpain") {
+        // Exact expiration wins when given: /maxpain?ticker=AAPL&exp=2026-08-03
+        const expParam = (url.searchParams.get("exp") || "").replace(/[^0-9-]/g, "");
+        if (expParam) {
+          // strikeLimit trims the chain around the money; too tight a window
+          // biases max pain toward whichever side survived the trim.
+          const lim = parseInt(url.searchParams.get("strikes") || "0", 10) || 0;
+          const rows = await fetchChainByDte(ticker, null, lim || null, env, expParam);
+          const mp = computeMaxPain(rows);
+          let spot = null;
+          try { spot = (await getQuote(ticker, env)).price; } catch (e) {}
+          const out = { ticker, expiration: expParam, maxPain: mp.maxPain, strikesConsidered: mp.strikesConsidered, spot, contracts: rows.length };
+          if (url.searchParams.get("detail")) {
+            const by = {};
+            for (const x of rows) {
+              if (!by[x.strike]) by[x.strike] = { strike: x.strike, call: 0, put: 0 };
+              by[x.strike][x.side === "call" ? "call" : "put"] += x.oi;
+            }
+            out.topOi = Object.values(by)
+              .sort((a, b) => (b.call + b.put) - (a.call + a.put))
+              .slice(0, 10);
+            out.totalCallOi = rows.filter((x) => x.side === "call").reduce((n, x) => n + x.oi, 0);
+            out.totalPutOi = rows.filter((x) => x.side === "put").reduce((n, x) => n + x.oi, 0);
+          }
+          return json(out, 200, cors);
+        }
         const depthParam = url.searchParams.get("depth");
         if (depthParam === "weekly") {
           return json(await getWeeklyMaxPain(ticker, env), 200, cors);
@@ -596,10 +633,13 @@ async function getIndexes(env) {
 // ---- MarketData options -> max pain ----
 // Fetch one live expiration (nearest to `dte` days out). Pinning to a dte target
 // keeps MarketData from returning already-expired contracts (which error the full chain).
-async function fetchChainByDte(ticker, dte, strikeLimit, env) {
+async function fetchChainByDte(ticker, dte, strikeLimit, env, exp) {
   const base = `https://api.marketdata.app/v1/options/chain/${ticker}/`;
   const params = new URLSearchParams();
-  params.set("dte", String(dte));
+  // An explicit expiration beats a day-count target: dte picks the NEAREST
+  // expiration, which can silently land on a past Friday.
+  if (exp) params.set("expiration", exp);
+  else params.set("dte", String(dte));
   if (strikeLimit) params.set("strikeLimit", String(strikeLimit));
   const r = await fetch(base + "?" + params.toString(), {
     headers: { Authorization: `Bearer ${env.MARKETDATA_KEY}` },
@@ -663,7 +703,15 @@ async function getWeeklyMaxPain(ticker, env) {
       byExp[x.exp].push(x);
     }
   }
-  const exps = Object.keys(byExp).map(Number).sort((a, b) => a - b).slice(0, 4);
+  // dte matching can hand back an expiration that has ALREADY passed (a dte=1
+  // request on a Monday returned the previous Friday), so drop anything before
+  // today before taking the next four.
+  const todayET = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+  const exps = Object.keys(byExp).map(Number)
+    .filter((e) => new Date(e * 1000).toISOString().slice(0, 10) >= todayET)
+    .sort((a, b) => a - b).slice(0, 4);
   if (!exps.length) throw new Error("no live weekly expirations for " + ticker);
   let spot = null;
   try { spot = (await getQuote(ticker, env)).price; } catch (e) {}
