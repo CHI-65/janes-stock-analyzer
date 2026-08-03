@@ -93,6 +93,9 @@ export default {
         // at a time with a small gap. Any ticker Yahoo misses falls back to a
         // Finnhub regular-session quote so the row still gets a number.
         const quotes = await getYahooQuotesBatch(syms);
+        // Overnight is a page scrape, one load per ticker, so only pay for it
+        // inside the 8pm-4am ET window when Blue Ocean is actually trading.
+        const ovn = inOvernightWindow() ? await getYahooOvernight(syms, env) : {};
         const cards = [];
         for (const s of syms) {
           let q = quotes[s] || null;
@@ -117,6 +120,7 @@ export default {
             pre: (q && q.pre) || null,
             regular: (q && q.regular) || null,
             post: (q && q.post) || null,
+            overnight: ovn[s] || null,
           });
           await sleep(120);
         }
@@ -187,39 +191,12 @@ export default {
           out.v8span = days;
         }
       } catch (e) { out.v8err = String(e && e.message || e); }
-      // Does Yahoo's own quote PAGE show an overnight print the JSON API omits?
+      // The overnight (Blue Ocean) print only exists on the quote PAGE.
       try {
-        const r = await fetch("https://finance.yahoo.com/quote/" + tk + "/", {
-          headers: { "User-Agent": YUA, Accept: "text/html" },
-        });
-        out.htmlStatus = r.status;
-        const html = await r.text();
-        out.htmlHasOvernight = /overnight/i.test(html);
-        // Look for a DATA shape, not the feature-flag list: a price field or a
-        // market-state value that names the overnight session.
-        const pats = {
-          overnightMarketField: /"?overnightMarket[A-Za-z]*"?\s*:/gi,
-          overnightPriceKey: /"[a-z]*overnight[a-z]*(price|time|change)[a-z]*"/gi,
-          marketStateOvernight: /"marketState"\s*:\s*"([A-Z]+)"/gi,
-          overnightLabel: /Overnight[^"<]{0,40}/g,
-        };
-        out.htmlPatterns = {};
-        Object.keys(pats).forEach((k) => {
-          const found = [];
-          let m;
-          while ((m = pats[k].exec(html)) && found.length < 6) found.push(m[0].slice(0, 120));
-          out.htmlPatterns[k] = found;
-        });
-        // Plain slicing around the label — a backtracking regex over a 2 MB page
-        // burns the worker's CPU budget.
-        const ctx2 = [];
-        let at = html.indexOf("Overnight:");
-        while (at !== -1 && ctx2.length < 3) {
-          ctx2.push(html.slice(Math.max(0, at - 2400), at + 400).replace(/<[^>]*>/g, " ").replace(/\s+/g, " "));
-          at = html.indexOf("Overnight:", at + 1);
-        }
-        out.htmlOvernightContext = ctx2;
-      } catch (e) { out.htmlErr = String(e && e.message || e); }
+        const o = await getYahooOvernight([tk], env);
+        out.overnight = o[tk] || null;
+        out.overnightWindow = inOvernightWindow();
+      } catch (e) { out.overnightErr = String(e && e.message || e); }
       return json(out, 200, cors);
     }
     if (!ticker) return json({ error: "missing ticker" }, 400, cors);
@@ -343,6 +320,97 @@ async function getYahooQuotesBatch(tickers) {
     }
   } catch (e) {}
   return out;
+}
+
+// ---- Overnight session (Blue Ocean ATS, 8pm-4am ET) ----
+// Yahoo's JSON quote API has no overnight field — only pre/regular/post. The
+// quote PAGE does server-render it, as "<price> <change> (<pct>%) Overnight:
+// <time>", so that's where this reads from. Scraping is more brittle than an
+// API, so every failure here is silent: no overnight leg, and the app just
+// doesn't offer the OVN choice.
+
+// Blue Ocean runs Sunday 8pm through Friday 4am ET. Outside that there is
+// nothing to fetch, so we skip the page loads entirely rather than pay for
+// twelve 2 MB downloads on every daytime refresh.
+function etParts() {
+  const f = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York", weekday: "short", hour: "numeric", hour12: false,
+  });
+  const p = {};
+  f.formatToParts(new Date()).forEach((x) => { p[x.type] = x.value; });
+  const days = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return { hour: parseInt(p.hour, 10) % 24, dow: days[p.weekday] };
+}
+function inOvernightWindow() {
+  const { hour, dow } = etParts();
+  if (hour >= 20) return dow >= 0 && dow <= 4;  // Sun-Thu evening
+  if (hour < 4) return dow >= 1 && dow <= 5;    // Mon-Fri small hours
+  return false;
+}
+
+// Pull the overnight quote for each ticker. Pages are fetched in parallel and
+// cached briefly in KV, because this is one full page load per ticker.
+async function getYahooOvernight(tickers, env) {
+  const out = {};
+  const list = (tickers || []).filter(Boolean);
+  if (!list.length) return out;
+  await Promise.all(list.map(async (t) => {
+    try {
+      const kvKey = "ovn:" + t;
+      if (env && env.USAGE) {
+        const hit = await env.USAGE.get(kvKey);
+        if (hit) { out[t] = JSON.parse(hit); return; }
+      }
+      const r = await fetch("https://finance.yahoo.com/quote/" + encodeURIComponent(t) + "/", {
+        headers: { "User-Agent": YUA, Accept: "text/html" },
+      });
+      if (!r.ok) return;
+      const html = await r.text();
+      const q = parseOvernight(html);
+      if (!q) return;
+      out[t] = q;
+      if (env && env.USAGE) await env.USAGE.put(kvKey, JSON.stringify(q), { expirationTtl: 60 });
+    } catch (e) {}
+  }));
+  return out;
+}
+
+// The markup around the label is "…308.95 +0.04 (+0.01%) Overnight: 2:29 AM EDT".
+// Take the text just before the label, strip tags, and read the last
+// price/change/percent triple out of it. indexOf + a short slice on purpose:
+// a regex across the whole 2 MB page blows the worker's CPU budget.
+function parseOvernight(html) {
+  // "Overnight:" appears several times (nav labels, disclaimers). Only one of
+  // them has a price triple in front of it, so try each until one parses.
+  let at = html.indexOf("Overnight:");
+  while (at !== -1) {
+    // 6 KB of RAW html — the visible numbers are only ~120 characters of text,
+    // but the markup between them is bulky, so a small raw window misses them.
+    const text = html.slice(Math.max(0, at - 6000), at).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
+    // The sign is OPTIONAL: when a stock is exactly flat overnight Yahoo prints
+    // "308.91 0.00 (0.00%)" with no +/-. Requiring a sign made the parser skip it
+    // and silently fall back to the "At close" triple further up the page.
+    const re = /([\d,]+\.\d+)\s+([+-]?[\d,]*\.?\d+)\s+\(([+-]?[\d.]+)%\)/g;
+    let m, last = null;
+    while ((m = re.exec(text))) last = m;
+    // The overnight triple sits immediately before the label. Anything further
+    // back is a different quote block ("At close: …"), so reject it rather than
+    // report the wrong number.
+    if (last && text.length - (last.index + last[0].length) > 30) last = null;
+    if (last) {
+      const price = parseFloat(last[1].replace(/,/g, ""));
+      const changePct = parseFloat(last[3]);
+      if (isFinite(price) && isFinite(changePct)) {
+        // The timestamp Yahoo prints here is "as of now" during the session.
+        const tail = html.slice(at + 10, at + 60);
+        const cut = tail.indexOf("<");
+        const asOf = (cut === -1 ? tail : tail.slice(0, cut)).trim();
+        return { price, changePct, asOf: asOf || null, source: "yahoo-page" };
+      }
+    }
+    at = html.indexOf("Overnight:", at + 1);
+  }
+  return null;
 }
 
 // ---- Finnhub quote (free, regular session only) ----

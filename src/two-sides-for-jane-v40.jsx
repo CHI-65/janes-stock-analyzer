@@ -453,6 +453,15 @@ function MaxPainBox({ sym, getMaxPain, getWeeklyMaxPain }) {
   );
 }
 
+// The four price sessions the watchlist can show, in the order the trading day
+// runs them. LEG is the field the worker sends each one under.
+const SESSIONS = {
+  ovn: { label: "OVN", name: "overnight", leg: "overnight", ink: "#1E3A8A", wash: "#DBEAFE", edge: "#93C5FD" },
+  pre: { label: "PRE", name: "pre-market", leg: "pre", ink: "#92400E", wash: "#FEF3C7", edge: "#FCD34D" },
+  aft: { label: "AFT", name: "after-hours", leg: "post", ink: "#5B21B6", wash: "#EDE9FE", edge: "#C4B5FD" },
+  mc: { label: "MC", name: "market close", leg: "regular", ink: null, wash: null, edge: null },
+};
+
 function WatchRow({ item, onPick, onRemove, reorderable, isReordering, onReorderStart, onReorderMove, onReorderEnd }) {
   const [dx, setDx] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -613,7 +622,7 @@ function WatchRow({ item, onPick, onRemove, reorderable, isReordering, onReorder
             <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 12, color: palette.ink, opacity: 0.6 }}>{"…"}</span>
           ) : priceText ? (
             <>
-              {!item.gold && (item.session === "pre" || item.session === "post") && (
+              {!item.gold && item.modeKey && item.modeKey !== "mc" && (
                 <span
                   style={{
                     fontFamily: "'Outfit', sans-serif",
@@ -624,12 +633,12 @@ function WatchRow({ item, onPick, onRemove, reorderable, isReordering, onReorder
                     padding: "2px 5px",
                     borderRadius: 5,
                     alignSelf: "center",
-                    color: item.session === "pre" ? "#92400E" : "#5B21B6",
-                    background: item.session === "pre" ? "#FDE68A" : "#DDD6FE",
+                    color: SESSIONS[item.modeKey].ink,
+                    background: SESSIONS[item.modeKey].wash,
                   }}
-                  title={item.session === "pre" ? "Pre-market price" : "After-hours price"}
+                  title={SESSIONS[item.modeKey].name + " price"}
                 >
-                  {item.session === "pre" ? "PRE" : "AFT"}
+                  {SESSIONS[item.modeKey].label}
                 </span>
               )}
               <span style={{ fontFamily: "'Fraunces', serif", fontWeight: 900, fontSize: 14, color: item.gold ? palette.oceanDark : palette.ink }}>
@@ -645,8 +654,8 @@ function WatchRow({ item, onPick, onRemove, reorderable, isReordering, onReorder
             <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 12, fontWeight: 700, color: "#8a5a00" }}>tap {"›"}</span>
           ) : item.extNote ? (
             <span
-              style={{ fontFamily: "'Outfit', sans-serif", fontSize: 11.5, fontWeight: 700, color: item.session === "pre" ? "#92400E" : "#5B21B6", opacity: 0.8 }}
-              title={item.session === "pre" ? "This one hasn't traded pre-market" : "This one didn't trade after hours"}
+              style={{ fontFamily: "'Outfit', sans-serif", fontSize: 11.5, fontWeight: 700, color: SESSIONS[item.modeKey].ink, opacity: 0.8 }}
+              title={"This one hasn't traded in the " + SESSIONS[item.modeKey].name + " session"}
             >
               {item.extNote}
             </span>
@@ -752,34 +761,41 @@ function WatchlistScreen({ favs, onPick, onBack, onAdd, onRemove, onAsk, getCard
     if (k === sortKey) setSortAsc((v) => !v);
     else { setSortKey(k); setSortAsc(k === "ticker"); }
   };
-  // Before the opening bell the extended session is pre-market; every other hour
-  // it's after-hours. Yahoo's own market state decides, so the button offers PRE
-  // in the morning and AFT the rest of the time — and defaults to whichever one
-  // is live right now (pre-market) or to the close (everything else). While the
-  // market is actually open there's nothing to switch to (the regular price IS
-  // the live one), so the button greys out until the closing bell.
+  // Which prices exist right now, current session FIRST — that first entry is
+  // the default, so the list always opens on whatever is trading. Overnight is
+  // only in the data during its 8pm-4am window, so its presence is the signal.
+  // While the market is open the regular price IS the live one, so there is
+  // nothing to switch to and the button greys out.
   const marketState = (favs || []).reduce((found, s) => found || (cards[s] && cards[s].marketState) || null, null);
-  const isPre = marketState === "PRE";
   const isOpen = marketState === "REGULAR";
-  const extLeg = isPre ? "pre" : "post";
-  const extLabel = isPre ? "PRE" : "AFT";
-  const mode = isOpen ? "mc" : priceMode || (isPre ? "ext" : "mc");
+  const hasOvernight = (favs || []).some((s) => cards[s] && cards[s].overnight && typeof cards[s].overnight.price === "number");
+  const MODES = isOpen
+    ? ["mc"]
+    : hasOvernight
+    ? ["ovn", "aft", "mc"]
+    : marketState === "PRE"
+    ? ["pre", "mc"]
+    : ["aft", "mc"];
+  const mode = MODES.indexOf(priceMode) !== -1 ? priceMode : MODES[0];
+  const nextMode = MODES[(MODES.indexOf(mode) + 1) % MODES.length];
+  const S = SESSIONS[mode];
   // Swap in whichever leg the toggle is on. Done before sorting so "Price" and
-  // "% Chg" sort on what's actually on screen. A ticker with no extended-session
-  // print (thinly traded, or the Finnhub fallback filled the row) says so rather
-  // than quietly falling back to the close and looking like a real PRE/AFT price.
+  // "% Chg" sort on what's actually on screen. A ticker with no print in this
+  // session (thinly traded, or the Finnhub fallback filled the row) says so
+  // rather than quietly falling back to the close and looking like a real one.
   const inMode = (c) => {
     if (!c || c.loading || c.gold) return c;
-    if (mode === "ext") {
-      const src = extLeg === "pre" ? c.pre : c.post;
-      const note = isPre ? "no pre-market" : "no after-hours";
-      if (!src || typeof src.price !== "number") return { ...c, price: null, change: null, changePct: null, session: extLeg, extNote: note };
-      // change (dollars) stays null: it's the regular-session figure, and the
-      // up/down arrow would point the wrong way if the extended % is missing.
-      return { ...c, price: src.price, change: null, changePct: src.changePct, session: extLeg };
+    const src = c[S.leg];
+    if (mode === "mc") {
+      if (!src || typeof src.price !== "number") return { ...c, modeKey: "mc" };
+      return { ...c, price: src.price, changePct: src.changePct, modeKey: "mc" };
     }
-    if (!c.regular || typeof c.regular.price !== "number") return { ...c, session: "regular" };
-    return { ...c, price: c.regular.price, changePct: c.regular.changePct, session: "regular" };
+    if (!src || typeof src.price !== "number") {
+      return { ...c, price: null, change: null, changePct: null, modeKey: mode, extNote: "no " + S.name };
+    }
+    // change (dollars) stays null: it's the regular-session figure, and the
+    // up/down arrow would point the wrong way if this session's % is missing.
+    return { ...c, price: src.price, change: null, changePct: src.changePct, modeKey: mode };
   };
   let ordered = (favs || []).map((s) => inMode(cards[s] || { ticker: s, loading: true }));
   if (sortKey !== "order") {
@@ -884,30 +900,26 @@ function WatchlistScreen({ favs, onPick, onBack, onAdd, onRemove, onAsk, getCard
           </h1>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button
-              onClick={() => setPriceMode(mode === "ext" ? "mc" : "ext")}
+              onClick={() => setPriceMode(nextMode)}
               disabled={isOpen}
               aria-label={
                 isOpen
-                  ? "The market is open, so these prices are live. The pre-market and after-hours toggle comes back outside trading hours."
-                  : mode === "ext"
-                  ? `Showing ${isPre ? "pre-market" : "after-hours"} prices. Tap for market close prices.`
-                  : `Showing market close prices. Tap for ${isPre ? "pre-market" : "after-hours"} prices.`
+                  ? "The market is open, so these prices are live. The session toggle comes back outside trading hours."
+                  : `Showing ${S.name} prices. Tap for ${SESSIONS[nextMode].name} prices.`
               }
               title={
                 isOpen
                   ? "Market is open — these prices are live"
-                  : mode === "ext"
-                  ? `Showing ${isPre ? "pre-market" : "after-hours"} prices — tap for the market close`
-                  : `Showing market close prices — tap for ${isPre ? "pre-market" : "after-hours"}`
+                  : `Showing ${S.name} prices — tap for ${SESSIONS[nextMode].name}`
               }
               style={{
                 fontFamily: "'Outfit', sans-serif",
                 fontWeight: 800,
                 fontSize: 12.5,
                 letterSpacing: "0.04em",
-                color: isOpen ? palette.ink : mode === "ext" ? palette.white : palette.oceanDark,
-                background: isOpen ? "rgba(255,255,255,0.55)" : mode === "ext" ? (isPre ? "#B45309" : "#6D28D9") : "rgba(255,255,255,0.85)",
-                border: `2px solid ${isOpen ? "#9DB8C0" : mode === "ext" ? (isPre ? "#B45309" : "#6D28D9") : palette.ocean}`,
+                color: isOpen || mode === "mc" ? (isOpen ? palette.ink : palette.oceanDark) : palette.white,
+                background: isOpen ? "rgba(255,255,255,0.55)" : mode === "mc" ? "rgba(255,255,255,0.85)" : S.ink,
+                border: `2px solid ${isOpen ? "#9DB8C0" : mode === "mc" ? palette.ocean : S.ink}`,
                 borderRadius: 999,
                 height: 38,
                 padding: "0 13px",
@@ -918,7 +930,7 @@ function WatchlistScreen({ favs, onPick, onBack, onAdd, onRemove, onAsk, getCard
                 justifyContent: "center",
               }}
             >
-              {mode === "ext" ? extLabel : "MC"}
+              {S.label}
             </button>
             <button
               onClick={() => loadAll(true)}
@@ -966,24 +978,27 @@ function WatchlistScreen({ favs, onPick, onBack, onAdd, onRemove, onAsk, getCard
             )}
           </div>
         </div>
-        {mode === "ext" && (
+        {mode !== "mc" && (
           <div
             style={{
               fontFamily: "'Outfit', sans-serif",
               fontSize: 12.5,
               fontWeight: 600,
-              color: isPre ? "#92400E" : "#5B21B6",
-              background: isPre ? "#FEF3C7" : "#EDE9FE",
-              border: `1px solid ${isPre ? "#FCD34D" : "#C4B5FD"}`,
+              color: S.ink,
+              background: S.wash,
+              border: `1px solid ${S.edge}`,
               borderRadius: 10,
               padding: "6px 10px",
               marginBottom: 10,
               lineHeight: 1.35,
             }}
           >
-            {isPre
-              ? `Showing pre-market prices, before today's 9:30am open. The % is the move since yesterday's close. Tap PRE for closing prices.`
-              : `Showing after-hours prices. The % is the move since the 4pm close. Tap AFT for closing prices.`}
+            {mode === "ovn"
+              ? "Showing overnight prices, traded 8pm–4am ET. "
+              : mode === "pre"
+              ? "Showing pre-market prices, before today's 9:30am open. "
+              : "Showing after-hours prices, traded after the 4pm close. "}
+            The % is the move since the last 4pm close. Tap {S.label} for {SESSIONS[nextMode].name}.
           </div>
         )}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: hint ? 8 : 10 }}>
