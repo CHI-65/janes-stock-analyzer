@@ -214,6 +214,21 @@ export default {
       // Which expirations are actually listed right now (MarketData's own list,
       // so "is there one expiring today?" is answered by the venue, not by us
       // guessing from a day count).
+      // What the data vendor says about our own quota — lets us price a feature
+      // change from the account's real headers instead of guessing.
+      if (url.pathname === "/quota") {
+        const which = url.searchParams.get("call") || "expirations";
+        const target = which === "chain"
+          ? `https://api.marketdata.app/v1/options/chain/${ticker}/?expiration=${encodeURIComponent(url.searchParams.get("exp") || "")}`
+          : `https://api.marketdata.app/v1/options/expirations/${ticker}/`;
+        const r = await fetch(target, { headers: { Authorization: `Bearer ${env.MARKETDATA_KEY}` } });
+        const hdr = {};
+        r.headers.forEach((v, k) => { if (/ratelimit|credit|quota|x-api/i.test(k)) hdr[k] = v; });
+        const raw = await r.text();
+        let d = null; try { d = JSON.parse(raw); } catch (e) {}
+        const n = d && Array.isArray(d.optionSymbol) ? d.optionSymbol.length : null;
+        return json({ call: which, http: r.status, contractsReturned: n, headers: hdr }, 200, cors);
+      }
       if (url.pathname === "/expirations") {
         const r = await fetch(`https://api.marketdata.app/v1/options/expirations/${ticker}/`, {
           headers: { Authorization: `Bearer ${env.MARKETDATA_KEY}` },
@@ -250,6 +265,10 @@ export default {
           return json(out, 200, cors);
         }
         const depthParam = url.searchParams.get("depth");
+        if (depthParam === "window") {
+          const days = Math.min(90, Math.max(1, parseInt(url.searchParams.get("days") || "30", 10) || 30));
+          return json(await getMaxPainWindow(ticker, days, env), 200, cors);
+        }
         if (depthParam === "weekly") {
           return json(await getWeeklyMaxPain(ticker, env), 200, cors);
         }
@@ -691,6 +710,34 @@ function computeMaxPain(rows) {
 // Pull option chains around weekly dte offsets, dedup by actual expiration, then
 // compute one max pain per expiration. dte=1 (not 0) reliably captures the
 // nearest Friday without tripping MarketData's already-expired guard.
+// Max pain for EVERY listed expiration inside `days` (the 30-day view). Asks
+// the venue which dates exist, then fetches those chains in parallel — one
+// round trip's latency instead of nine. Expirations MarketData lists but has no
+// chain for (it answers s=no_data) are dropped, not surfaced as errors.
+async function getMaxPainWindow(ticker, days, env) {
+  const r = await fetch(`https://api.marketdata.app/v1/options/expirations/${ticker}/`, {
+    headers: { Authorization: `Bearer ${env.MARKETDATA_KEY}` },
+  });
+  const d = await r.json();
+  const all = (d && d.expirations) || [];
+  const todayET = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+  const cut = new Date(Date.parse(todayET + "T00:00:00Z") + days * 86400000).toISOString().slice(0, 10);
+  const want = all.filter((e) => e >= todayET && e <= cut);
+  const settled = await Promise.all(want.map(async (e) => {
+    try {
+      const rows = await fetchChainByDte(ticker, null, null, env, e);
+      const mp = computeMaxPain(rows);
+      if (mp.maxPain == null) return null;
+      return { expiration: e, maxPain: mp.maxPain, strikesConsidered: mp.strikesConsidered };
+    } catch (err) { return null; }
+  }));
+  let spot = null;
+  try { spot = (await getQuote(ticker, env)).price; } catch (e) {}
+  return { ticker, spot, days, listed: want.length, weeks: settled.filter(Boolean) };
+}
+
 async function getWeeklyMaxPain(ticker, env) {
   const targets = [1, 8, 15, 22, 29];
   const byExp = {};
