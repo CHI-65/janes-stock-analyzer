@@ -97,12 +97,29 @@ export default {
         // inside the 8pm-4am ET window when Blue Ocean is actually trading.
         const ovn = inOvernightWindow() ? await getYahooOvernight(syms, env) : {};
         const cards = [];
+        // Why each row ended up with the price it did — surfaced by ?debug=1 so a
+        // stale row can be told apart from a rate-limited one without guessing.
+        const why = {};
+        let spentFinnhub = 0;
         for (const s of syms) {
           let q = quotes[s] || null;
           let p = null;
           try { p = await getProfile(s, env); } catch (e) {}
           if (!q || typeof q.price !== "number") {
             try { q = await getQuote(s, env); } catch (e) { q = null; }
+          }
+          // Yahoo answering with a LAST-SESSION price is a separate failure from
+          // Yahoo not answering at all, and needs its own check. Paced, not
+          // parallel: firing one Finnhub call per row at once trips the free
+          // tier's burst limit, and the rows that lose silently keep yesterday's
+          // price. Spacing them costs a couple of seconds on a cold cache and
+          // nothing at all on a warm one.
+          if (q && yahooRegularIsStale(q)) {
+            if (spentFinnhub > 0) await sleep(320);
+            spentFinnhub++;
+            q = await freshenIfStale(s, q, env, why);
+          } else {
+            why[s] = q ? "yahoo-ok" : "no-quote";
           }
           cards.push({
             ticker: s,
@@ -122,11 +139,53 @@ export default {
             post: (q && q.post) || null,
             overnight: ovn[s] || null,
           });
-          await sleep(120);
+          // Profiles are KV-cached now, so the old blanket per-row pause is pure
+          // latency; the Finnhub pacing above is the only spacing still needed.
         }
-        return json({ cards }, 200, cors);
+        return json(url.searchParams.get("debug") ? { cards, why } : { cards }, 200, cors);
       } catch (e) {
         return json({ error: String(e && e.message || e) }, 502, cors);
+      }
+    }
+    // Which feed is actually current? Yahoo and Finnhub side by side, each with
+    // the market-time day of its print, so "stale" is answerable at a glance.
+    if (url.pathname === "/freshness") {
+      const tk = ticker || "AAPL";
+      const out = { ticker: tk, todayET: etDay(Date.now()) };
+      try {
+        const b = await getYahooQuotesBatch([tk]);
+        const q = b[tk];
+        out.yahoo = q
+          ? { price: q.price, asOf: q.asOf, day: q.asOf ? etDay(Date.parse(q.asOf)) : null,
+              marketState: q.marketState, stale: yahooRegularIsStale(q) }
+          : null;
+      } catch (e) { out.yahooErr = String(e && e.message || e); }
+      try {
+        const f = await getFinnhubQuote(tk, env);
+        out.finnhub = { price: f.price, asOf: f.asOf, day: f.asOf ? etDay(Date.parse(f.asOf)) : null };
+      } catch (e) { out.finnhubErr = String(e && e.message || e); }
+      try {
+        const served = await getQuote(tk, env);
+        out.served = { price: served.price, asOf: served.asOf, source: served.source };
+      } catch (e) { out.servedErr = String(e && e.message || e); }
+      return json(out, 200, cors);
+    }
+    if (url.pathname === "/mdbulk") {
+      const syms = (url.searchParams.get("tickers") || "AAPL,TSLA")
+        .toUpperCase().split(",").map((s) => s.replace(/[^A-Z.\-]/g, "")).filter(Boolean).slice(0, 12);
+      try {
+        const q = await getMarketDataBulkQuotes(syms, env);
+        const today = etDay(Date.now());
+        const rows = {};
+        for (const s of syms) {
+          const v = q[s];
+          rows[s] = v ? { price: v.price, changePct: v.changePct, asOf: v.asOf,
+                          day: v.asOf ? etDay(Date.parse(v.asOf)) : null,
+                          fresh: !!(v.asOf && etDay(Date.parse(v.asOf)) === today) } : null;
+        }
+        return json({ todayET: today, count: Object.keys(q).length, rows }, 200, cors);
+      } catch (e) {
+        return json({ error: String(e && e.message || e) }, 200, cors);
       }
     }
     if (url.pathname === "/ydebug") {
@@ -315,7 +374,9 @@ const YUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML
 async function getQuote(ticker, env) {
   try {
     const b = await getYahooQuotesBatch([ticker]);
-    if (b[ticker] && typeof b[ticker].price === "number") return b[ticker];
+    if (b[ticker] && typeof b[ticker].price === "number") {
+      return await freshenIfStale(ticker, b[ticker], env);
+    }
   } catch (e) {}
   return await getFinnhubQuote(ticker, env);
 }
@@ -368,6 +429,75 @@ async function yahooQuoteRows(url, cc) {
   } catch (e) {
     return [];
   }
+}
+
+// Calendar day in market time, "YYYY-MM-DD". Used to ask "is this print from
+// TODAY's session?" — a day boundary is a far safer staleness test than an age
+// in minutes, which would trip over any normal feed delay.
+function etDay(ms) {
+  return new Date(ms).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+}
+
+// Yahoo can answer 200 with a perfectly well-formed quote whose regular print is
+// from a PREVIOUS session — that is what put yesterday's close on the watchlist
+// under a live "REGULAR" badge on 2026-08-06. It reads as healthy, so the old
+// "did Yahoo return a number?" fallback test never fired.
+//
+// Only meaningful once today's regular session has begun. During PRE,
+// regularMarketPrice legitimately holds the prior close, so that is NOT stale.
+function yahooRegularIsStale(q) {
+  const state = q && q.marketState;
+  if (state !== "REGULAR" && state !== "POST" && state !== "POSTPOST") return false;
+  const asOf = q && q.regular && q.regular.asOf;
+  const t = asOf ? Date.parse(asOf) : NaN;
+  if (!isFinite(t)) return true;
+  return etDay(t) !== etDay(Date.now());
+}
+
+// Swap a stale Yahoo row for a Finnhub quote — but ONLY if Finnhub is actually
+// fresher. If both feeds are behind we keep Yahoo, so this can never turn a
+// stale-but-real price into a blank row.
+async function freshenIfStale(sym, q, env, why) {
+  const note = (r) => { if (why) why[sym] = r; };
+  if (!q) { note("no-quote"); return q; }
+  if (!yahooRegularIsStale(q)) { note("yahoo-ok"); return q; }
+  // Finnhub first, Nasdaq only if Finnhub couldn't answer. Two providers with
+  // independent rate limits, so a throttle on one no longer pins a row to
+  // yesterday's close.
+  let f = null, via = "finnhub";
+  try {
+    f = await getFinnhubQuote(sym, env);
+    const ft = f && f.asOf ? Date.parse(f.asOf) : NaN;
+    if (!isFinite(ft) || etDay(ft) !== etDay(Date.now())) { f = null; via = "finnhub-stale"; }
+  } catch (e) { f = null; via = "finnhub-err:" + String(e && e.message || e); }
+  if (!f || typeof f.price !== "number") {
+    try {
+      f = await getNasdaqQuote(sym);
+      via = "nasdaq (after " + via + ")";
+    } catch (e2) {
+      note(via + " | nasdaq-err: " + String(e2 && e2.message || e2));
+      return q;
+    }
+  }
+  if (!f || typeof f.price !== "number") { note(via + " | no-price"); return q; }
+  note("swapped via " + via);
+  // We have today's print. Neither backstop carries pre/post legs, and Yahoo's
+  // are as stale as the price we're replacing, so drop them rather than serve a
+  // fresh price sitting next to day-old extended-session numbers.
+  return {
+    ticker: sym,
+    price: f.price,
+    change: f.change == null ? null : f.change,
+    changePct: f.changePct == null ? null : f.changePct,
+    session: "regular",
+    asOf: f.asOf,
+    // Report the provider that actually answered, not a fixed label.
+    source: (f.source || "fresh") + "-fresh",
+    marketState: q.marketState || null,
+    pre: null,
+    regular: { price: f.price, changePct: f.changePct == null ? null : f.changePct, asOf: f.asOf },
+    post: null,
+  };
 }
 
 // Returns { SYM: {ticker, price, change, changePct, session, asOf, source} } for
@@ -529,12 +659,41 @@ function parseOvernight(html) {
 // Retry once on a miss: a rate-limited call comes back empty, and a short pause
 // usually clears it.
 async function getFinnhubQuote(ticker, env) {
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // Finnhub's free tier is a per-minute budget, and this is now one call per row
+  // per refresh — a 12-row watchlist refreshed a few times a minute exhausts it,
+  // and the losing rows silently fall back to yesterday's Yahoo close. Serve a
+  // recent quote from the edge cache instead of re-buying it every refresh.
+  //
+  // Cache API rather than KV on purpose: KV's free tier allows ~1k writes/day and
+  // this would want thousands. The edge cache has no such cap.
+  const cacheKey = new Request("https://jsa.cache/fq/" + encodeURIComponent(ticker));
+  let cache = null;
+  try { cache = caches.default; } catch (e) { cache = null; }
+  if (cache) {
+    try {
+      const hit = await cache.match(cacheKey);
+      if (hit) return await hit.json();
+    } catch (e) {}
+  }
+  // Finnhub is the freshness backstop for the whole watchlist, so a row losing to
+  // a 429 shows up as yesterday's price sitting next to today's on the next row.
+  // Two attempts, not more: retrying hard INTO a per-minute budget spends the
+  // budget faster and makes the NEXT row likelier to fail. The pacing in /cards
+  // is what actually keeps us under the limit; this retry only covers a blip.
+  const ATTEMPTS = 2;
+  const backoff = [600];
+  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+    const last = attempt === ATTEMPTS - 1;
     const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=${ticker}&token=${env.FINNHUB_KEY}`);
     let q = null;
     try { q = await r.json(); } catch (e) { q = null; }
+    if (r.status === 429) {
+      if (last) throw new Error("finnhub rate limited for " + ticker);
+      await sleep(backoff[attempt]);
+      continue;
+    }
     if (q && typeof q.c === "number" && q.c !== 0) {
-      return {
+      const out = {
         ticker,
         price: q.c,
         change: q.d,
@@ -543,23 +702,129 @@ async function getFinnhubQuote(ticker, env) {
         asOf: q.t ? new Date(q.t * 1000).toISOString() : null,
         source: "finnhub",
       };
+      // 45s: fresh enough for a watchlist, long enough that a refresh storm
+      // costs one call per ticker instead of one per row per refresh.
+      if (cache) {
+        try {
+          await cache.put(cacheKey, new Response(JSON.stringify(out), {
+            headers: { "Content-Type": "application/json", "Cache-Control": "max-age=45" },
+          }));
+        } catch (e) {}
+      }
+      return out;
     }
-    if (attempt === 0) await sleep(300);
+    if (!last) await sleep(backoff[attempt]);
   }
   throw new Error("no quote for " + ticker);
 }
 
 // ---- Finnhub company profile (free): name + logo ----
+// ---- Nasdaq public quote: the second fresh source ----
+// Finnhub is the only feed carrying today's prices during the 2026-08-06 Yahoo
+// outage, but its free tier is a per-minute budget: on a 12-row list some rows
+// win and some 429, so the watchlist showed today's price next to yesterday's.
+// Nasdaq is a different provider with a different limit, used ONLY when Finnhub
+// has failed, so one provider throttling can no longer strand a row.
+//
+// Verified against Finnhub on 2026-08-06 (TSLA 319.68 vs 319.85, NVDA 221.69 vs
+// 222.03, AAPL 314.46 vs 314.83 — normal tick drift, same session).
+async function getNasdaqQuote(ticker) {
+  const r = await fetch(
+    `https://api.nasdaq.com/api/quote/${encodeURIComponent(ticker)}/info?assetclass=stocks`,
+    { headers: { "User-Agent": YUA, Accept: "application/json" } }
+  );
+  if (!r.ok) throw new Error("nasdaq http " + r.status);
+  const d = await r.json();
+  const p = (d && d.data && d.data.primaryData) || null;
+  if (!p) throw new Error("nasdaq no data for " + ticker);
+  const num = (v) => {
+    const n = parseFloat(String(v == null ? "" : v).replace(/[$,%\s]/g, ""));
+    return isFinite(n) ? n : null;
+  };
+  const price = num(p.lastSalePrice);
+  if (price == null) throw new Error("nasdaq no price for " + ticker);
+  // "Aug 6, 2026 10:06 AM ET" — only trust it if the date IS today in market time,
+  // otherwise this is just another way to serve a stale close.
+  const todayLabel = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York", month: "short", day: "numeric", year: "numeric",
+  }).format(new Date());
+  const stamp = String(p.lastTradeTimestamp || "");
+  if (stamp.indexOf(todayLabel) === -1) throw new Error("nasdaq stale for " + ticker + ": " + stamp);
+  return {
+    ticker,
+    price,
+    change: num(p.netChange),
+    changePct: num(p.percentageChange),
+    session: "regular",
+    asOf: new Date().toISOString(),
+    source: "nasdaq",
+  };
+}
+
+// ---- MarketData bulk quotes: the whole watchlist in ONE call ----
+// Finnhub's free tier bills per symbol per minute, so a 12-row list refreshed a
+// few times a minute gets 429s and the losing rows silently keep yesterday's
+// close. MarketData answers every symbol in a single request, which removes the
+// per-row budget problem entirely — and the account has ~10k requests/day
+// against roughly one per refresh here. Already keyed for the options work.
+// Returns { SYM: {price, changePct, asOf, source} }.
+async function getMarketDataBulkQuotes(tickers, env) {
+  const out = {};
+  const list = (tickers || []).filter(Boolean);
+  if (!list.length || !env || !env.MARKETDATA_KEY) return out;
+  const r = await fetch(
+    "https://api.marketdata.app/v1/stocks/bulkquotes/?symbols=" + encodeURIComponent(list.join(",")),
+    { headers: { Authorization: `Bearer ${env.MARKETDATA_KEY}` } }
+  );
+  // 203 is MarketData's "cached/delayed but valid" status, not an error.
+  if (r.status !== 200 && r.status !== 203) throw new Error("marketdata bulk http " + r.status);
+  const d = await r.json();
+  if (!d || (d.s !== "ok" && d.s !== "cached")) throw new Error("marketdata bulk status " + (d && d.s));
+  const syms = d.symbol || [];
+  for (let i = 0; i < syms.length; i++) {
+    const price = d.last && typeof d.last[i] === "number" ? d.last[i] : null;
+    if (price == null) continue;
+    const t = d.updated && d.updated[i] ? d.updated[i] : null;
+    out[String(syms[i]).toUpperCase()] = {
+      price,
+      change: d.change && typeof d.change[i] === "number" ? d.change[i] : null,
+      // MarketData sends changepct as a fraction (0.0123), the app wants percent.
+      changePct: d.changepct && typeof d.changepct[i] === "number" ? d.changepct[i] * 100 : null,
+      asOf: t ? new Date(t * 1000).toISOString() : null,
+      source: "marketdata",
+    };
+  }
+  return out;
+}
+
+// Cached hard in KV. A company's name and logo effectively never change, but
+// this was spending one Finnhub call per ticker on EVERY watchlist refresh —
+// which is the whole free-tier minute budget on a 12-row list, and it starved
+// the price calls that actually matter. Prices stayed a day stale because the
+// quote call behind them kept coming back rate-limited.
 async function getProfile(ticker, env) {
+  const kvKey = "prof:" + ticker;
+  if (env && env.USAGE) {
+    try {
+      const hit = await env.USAGE.get(kvKey);
+      if (hit) return JSON.parse(hit);
+    } catch (e) {}
+  }
   const r = await fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${ticker}&token=${env.FINNHUB_KEY}`);
   const p = await r.json();
-  return {
+  const out = {
     ticker,
     name: (p && p.name) || ticker,
     logo: (p && p.logo) || null,
     exchange: (p && p.exchange) || null,
     currency: (p && p.currency) || null,
   };
+  // Only cache a real answer — caching a rate-limited miss would pin the ticker
+  // to its own symbol as a name for a month.
+  if (env && env.USAGE && p && p.name) {
+    try { await env.USAGE.put(kvKey, JSON.stringify(out), { expirationTtl: 60 * 60 * 24 * 30 }); } catch (e) {}
+  }
+  return out;
 }
 
 // ---- One call for a watchlist row: name + logo + live price + change ----
