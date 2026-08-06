@@ -160,6 +160,31 @@ export default {
             out.v7raw = JSON.stringify(d).slice(0, 300);
           }
         } catch (e) { out.v7err = String(e && e.message || e); }
+        // Same call, but naming the pre/post fields explicitly — the side-by-side
+        // that shows whether Yahoo's trimmed default field set is what's costing
+        // us the extended-session prices.
+        try {
+          const rf = await fetch(
+            "https://query2.finance.yahoo.com/v7/finance/quote?crumb=" +
+              encodeURIComponent(cc.crumb) + "&symbols=" + tk +
+              "&fields=" + encodeURIComponent(YQ_FIELDS.join(",")),
+            { headers: { Cookie: cc.cookie, "User-Agent": YUA, Accept: "application/json" } }
+          );
+          out.v7fStatus = rf.status;
+          const df = await rf.json();
+          const qf = df && df.quoteResponse && df.quoteResponse.result && df.quoteResponse.result[0];
+          if (qf) {
+            out.v7f = {
+              marketState: qf.marketState,
+              regular: qf.regularMarketPrice,
+              pre: qf.preMarketPrice, prePct: qf.preMarketChangePercent,
+              post: qf.postMarketPrice, postPct: qf.postMarketChangePercent,
+            };
+            out.v7fkeys = Object.keys(qf).sort();
+          } else {
+            out.v7fraw = JSON.stringify(df).slice(0, 300);
+          }
+        } catch (e) { out.v7fErr = String(e && e.message || e); }
       }
       try {
         const r = await fetch(
@@ -322,6 +347,29 @@ async function yahooCrumb() {
   }
 }
 
+// Every v7 field this worker actually reads. Yahoo's default field set no longer
+// includes the pre/post ones, so the quote call names them explicitly — which
+// means anything left off this list stops arriving. Add here before reading it.
+const YQ_FIELDS = [
+  "symbol", "marketState",
+  "regularMarketPrice", "regularMarketChange", "regularMarketChangePercent", "regularMarketTime",
+  "preMarketPrice", "preMarketChange", "preMarketChangePercent", "preMarketTime",
+  "postMarketPrice", "postMarketChange", "postMarketChangePercent", "postMarketTime",
+];
+
+// One v7 quote call → its result rows (empty array on any failure).
+async function yahooQuoteRows(url, cc) {
+  try {
+    const r = await fetch(url, {
+      headers: { Cookie: cc.cookie, "User-Agent": YUA, Accept: "application/json" },
+    });
+    const d = await r.json();
+    return (d && d.quoteResponse && d.quoteResponse.result) || [];
+  } catch (e) {
+    return [];
+  }
+}
+
 // Returns { SYM: {ticker, price, change, changePct, session, asOf, source} } for
 // whatever symbols Yahoo answers. Picks pre/post/regular price by marketState.
 async function getYahooQuotesBatch(tickers) {
@@ -331,15 +379,23 @@ async function getYahooQuotesBatch(tickers) {
   const cc = await yahooCrumb();
   if (!cc) return out;
   try {
-    const url =
+    // Ask for the pre/post fields BY NAME. Yahoo trimmed its default v7 field
+    // set: as of 2026-08-06 a plain /v7/finance/quote answers 200 with
+    // marketState:"PRE" and hasPrePostMarketData, but no preMarketPrice at all,
+    // so every extended-session price came back null and the watchlist blanked.
+    // Naming them in `fields` brings them back. See YQ_FIELDS.
+    const base =
       "https://query2.finance.yahoo.com/v7/finance/quote?crumb=" +
       encodeURIComponent(cc.crumb) +
       "&symbols=" + encodeURIComponent(list.join(","));
-    const r = await fetch(url, {
-      headers: { Cookie: cc.cookie, "User-Agent": YUA, Accept: "application/json" },
-    });
-    const d = await r.json();
-    const arr = (d && d.quoteResponse && d.quoteResponse.result) || [];
+    let arr = await yahooQuoteRows(base + "&fields=" + encodeURIComponent(YQ_FIELDS.join(",")), cc);
+    // If naming fields ever backfires (Yahoo rejects the param, or answers with
+    // rows that have no price at all), fall back to the plain call rather than
+    // regress to no quotes.
+    if (!arr.some((q) => typeof q.regularMarketPrice === "number")) {
+      const plain = await yahooQuoteRows(base, cc);
+      if (plain.some((q) => typeof q.regularMarketPrice === "number")) arr = plain;
+    }
     for (const q of arr) {
       const sym = (q.symbol || "").toUpperCase();
       const state = q.marketState || "REGULAR";
