@@ -768,14 +768,23 @@ function WatchlistScreen({ favs, onPick, onBack, onAdd, onRemove, onAsk, getCard
   // nothing to switch to and the button greys out.
   const marketState = (favs || []).reduce((found, s) => found || (cards[s] && cards[s].marketState) || null, null);
   const isOpen = marketState === "REGULAR";
-  const hasOvernight = (favs || []).some((s) => cards[s] && cards[s].overnight && typeof cards[s].overnight.price === "number");
+  // Only offer a session if some row actually has a print in it. Yahoo is the
+  // sole source of the pre/post legs, so when it misses and every row comes
+  // from the Finnhub fallback there is no marketState and no pre/post at all —
+  // and the old "else" arm still opened the list on AFT, which blanked every
+  // price behind "no after-hours" even though a good close price was in hand.
+  const hasLeg = (leg) =>
+    (favs || []).some((s) => cards[s] && cards[s][leg] && typeof cards[s][leg].price === "number");
+  const hasOvernight = hasLeg("overnight");
   const MODES = isOpen
     ? ["mc"]
     : hasOvernight
-    ? ["ovn", "aft", "mc"]
+    ? ["ovn", ...(hasLeg("post") ? ["aft"] : []), "mc"]
     : marketState === "PRE"
-    ? ["pre", "mc"]
-    : ["aft", "mc"];
+    ? [...(hasLeg("pre") ? ["pre"] : []), "mc"]
+    : [...(hasLeg("post") ? ["aft"] : []), "mc"];
+  // Market close is then the only thing to show, so there's nothing to toggle to.
+  const soleMode = MODES.length < 2;
   const mode = MODES.indexOf(priceMode) !== -1 ? priceMode : MODES[0];
   const nextMode = MODES[(MODES.indexOf(mode) + 1) % MODES.length];
   const S = SESSIONS[mode];
@@ -901,15 +910,19 @@ function WatchlistScreen({ favs, onPick, onBack, onAdd, onRemove, onAsk, getCard
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button
               onClick={() => setPriceMode(nextMode)}
-              disabled={isOpen}
+              disabled={isOpen || soleMode}
               aria-label={
                 isOpen
                   ? "The market is open, so these prices are live. The session toggle comes back outside trading hours."
+                  : soleMode
+                  ? "Only market-close prices are available right now."
                   : `Showing ${S.name} prices. Tap for ${SESSIONS[nextMode].name} prices.`
               }
               title={
                 isOpen
                   ? "Market is open — these prices are live"
+                  : soleMode
+                  ? "Only market-close prices are available right now"
                   : `Showing ${S.name} prices — tap for ${SESSIONS[nextMode].name}`
               }
               style={{
@@ -923,8 +936,8 @@ function WatchlistScreen({ favs, onPick, onBack, onAdd, onRemove, onAsk, getCard
                 borderRadius: 999,
                 height: 38,
                 padding: "0 13px",
-                cursor: isOpen ? "default" : "pointer",
-                opacity: isOpen ? 0.45 : 1,
+                cursor: isOpen || soleMode ? "default" : "pointer",
+                opacity: isOpen || soleMode ? 0.45 : 1,
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
