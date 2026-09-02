@@ -4,6 +4,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 COMPILED = io.open(os.path.join(HERE, "app.compiled.js"), "r", encoding="utf-8").read()
 REACT = io.open(os.path.join(HERE, "reactpkg/node_modules/react/umd/react.production.min.js"), "r", encoding="utf-8").read()
 REACTDOM = io.open(os.path.join(HERE, "reactpkg/node_modules/react-dom/umd/react-dom.production.min.js"), "r", encoding="utf-8").read()
+ADDON = io.open(os.path.join(HERE, "alerts-addon.html"), "r", encoding="utf-8").read()
 
 HTML = '''<!DOCTYPE html>
 <html lang="en">
@@ -11,7 +12,7 @@ HTML = '''<!DOCTYPE html>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <meta name="theme-color" content="#CDEBF5" />
-<title>Jane's Stock Analyzer 4.0</title>
+<title>Jane's Stock Analyzer 4.1</title>
 <!-- Add-to-Home-Screen: launches full screen (no address bar) with a clean name -->
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -88,11 +89,13 @@ __REACTDOM__
 <script>
 __APP__
 </script>
+__ADDON__
 </body>
 </html>
 '''
 
 out = (HTML
+       .replace("__ADDON__", ADDON)
        .replace("__REACT__", REACT)
        .replace("__REACTDOM__", REACTDOM)
        .replace("__APP__", COMPILED))

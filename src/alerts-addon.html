@@ -1,0 +1,266 @@
+<!-- TWOSIDES-ALERTS-ADDON BEGIN v1
+     Self-contained price-alert feature. Appended after the main app; touches
+     nothing in the bundle. To remove: delete from BEGIN to END marker.
+     To re-inject after a rebuild: paste this whole block before </body>. -->
+<style>
+  .tsa-btn-main {
+    position: fixed; right: 16px; bottom: 16px; z-index: 99990;
+    font-family: 'Outfit', -apple-system, system-ui, sans-serif;
+    font-size: 20px; font-weight: 800; color: #ffffff; background: #1F2937;
+    border: 3px solid #111827; border-radius: 999px; padding: 14px 22px;
+    min-height: 56px; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+  }
+  .tsa-btn-main .tsa-count {
+    display: inline-block; margin-left: 8px; background: #17714C; color: #fff;
+    border-radius: 999px; padding: 2px 10px; font-size: 18px;
+  }
+  .tsa-panel {
+    position: fixed; right: 12px; bottom: 84px; z-index: 99991;
+    width: min(430px, calc(100vw - 24px)); max-height: min(72vh, 640px);
+    overflow-y: auto; background: #ffffff; color: #1F2937;
+    border: 3px solid #1F2937; border-radius: 18px; padding: 18px;
+    font-family: 'Outfit', -apple-system, system-ui, sans-serif; font-size: 18px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  }
+  .tsa-panel h2 { font-size: 26px; margin: 0 0 4px; }
+  .tsa-panel .tsa-sub { font-size: 17px; color: #374151; margin: 0 0 14px; }
+  .tsa-panel label { display: block; font-size: 18px; font-weight: 700; margin: 12px 0 4px; }
+  .tsa-panel input, .tsa-panel select {
+    width: 100%; box-sizing: border-box; font-family: inherit;
+    font-size: 22px; font-weight: 700; padding: 12px 14px;
+    border: 2px solid #4B5563; border-radius: 10px; background: #fff; color: #1F2937;
+  }
+  .tsa-panel input { text-transform: uppercase; }
+  .tsa-panel input.tsa-price { text-transform: none; }
+  .tsa-panel button {
+    font-family: inherit; font-size: 20px; font-weight: 800; cursor: pointer;
+    border-radius: 12px; padding: 14px 16px; min-height: 52px; border: none;
+  }
+  .tsa-add { width: 100%; background: #17714C; color: #fff; margin-top: 14px; }
+  .tsa-quiet { width: 100%; background: #fff; color: #1F2937; border: 2px solid #4B5563 !important; margin-top: 10px; }
+  .tsa-row {
+    border: 2px solid #9CA3AF; border-radius: 12px; padding: 12px 14px; margin-top: 12px;
+  }
+  .tsa-row.tsa-hit { border-color: #B91C1C; background: #FEF2F2; }
+  .tsa-row .tsa-line1 { font-size: 22px; font-weight: 800; }
+  .tsa-row .tsa-line2 { font-size: 19px; margin-top: 4px; }
+  .tsa-row .tsa-line3 { font-size: 16px; color: #374151; margin-top: 4px; }
+  .tsa-row .tsa-del {
+    background: #fff; color: #B91C1C; border: 2px solid #B91C1C !important;
+    font-size: 17px; padding: 8px 14px; min-height: 40px; margin-top: 10px;
+  }
+  .tsa-alarm-overlay {
+    position: fixed; inset: 0; z-index: 99999; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center; padding: 24px;
+    background: rgba(122, 20, 20, 0.96); color: #fff;
+    font-family: 'Outfit', -apple-system, system-ui, sans-serif;
+    animation: tsaFlash 0.9s infinite;
+  }
+  @keyframes tsaFlash { 0%,100% { background: rgba(122,20,20,0.96); } 50% { background: rgba(64,10,10,0.96); } }
+  @media (prefers-reduced-motion: reduce) { .tsa-alarm-overlay { animation: none; } }
+  .tsa-alarm-overlay .tsa-big { font-size: clamp(34px, 8vw, 64px); font-weight: 800; line-height: 1.15; }
+  .tsa-alarm-overlay .tsa-now { font-size: clamp(24px, 5vw, 38px); margin-top: 14px; }
+  .tsa-alarm-overlay button {
+    margin-top: 30px; font-family: inherit; font-size: 26px; font-weight: 800;
+    background: #FDE68A; color: #1a1400; border: none; border-radius: 14px;
+    padding: 18px 34px; min-height: 64px; cursor: pointer;
+  }
+  .tsa-btn-main:focus-visible, .tsa-panel input:focus-visible,
+  .tsa-panel select:focus-visible, .tsa-panel button:focus-visible,
+  .tsa-alarm-overlay button:focus-visible {
+    outline: 4px solid #1D4ED8; outline-offset: 2px;
+  }
+</style>
+<script>
+(function () {
+  "use strict";
+  var PROXY = "https://two-sides-proxy.calharrisinc.workers.dev";
+  var STORE = "twosides:alerts";
+  var POLL_MS = 5000;
+
+  var alerts = [];
+  try { alerts = JSON.parse(localStorage.getItem(STORE) || "[]"); } catch (e) { alerts = []; }
+  function save() { try { localStorage.setItem(STORE, JSON.stringify(alerts)); } catch (e) {} }
+
+  var lastPrices = {};   // ticker -> {price, t}
+  var audioCtx = null, alarmTimer = null, panelOpen = false;
+
+  // ---------- UI scaffolding ----------
+  var btn = document.createElement("button");
+  btn.className = "tsa-btn-main";
+  btn.setAttribute("aria-label", "Price alerts");
+  document.body.appendChild(btn);
+
+  var panel = document.createElement("div");
+  panel.className = "tsa-panel";
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-label", "Price alerts");
+  panel.style.display = "none";
+  document.body.appendChild(panel);
+
+  var live = document.createElement("div");
+  live.setAttribute("aria-live", "polite");
+  live.style.cssText = "position:fixed;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);";
+  document.body.appendChild(live);
+
+  function fmt(p) {
+    return "$" + (p >= 1000 ? Math.round(p).toLocaleString() : Number(p).toFixed(2));
+  }
+  function renderBtn() {
+    var active = alerts.filter(function (a) { return !a.hit; }).length;
+    btn.innerHTML = "\uD83D\uDD14 Alerts" + (active ? ' <span class="tsa-count">' + active + "</span>" : "");
+  }
+
+  function renderPanel() {
+    var canNotify = ("Notification" in window);
+    var notifState = canNotify ? Notification.permission : "unsupported";
+    var html = "";
+    html += "<h2>Price alerts</h2>";
+    html += '<p class="tsa-sub">Checks every 5 seconds — regular hours, pre-market, after-hours and overnight.</p>';
+    html += '<label for="tsaTicker">Stock (or BTC)</label>';
+    html += '<input id="tsaTicker" autocomplete="off" placeholder="MU">';
+    html += '<label for="tsaDir">Alert me when the price goes</label>';
+    html += '<select id="tsaDir"><option value="above">Above my target</option><option value="below">Below my target</option></select>';
+    html += '<label for="tsaTarget">Target price ($)</label>';
+    html += '<input id="tsaTarget" class="tsa-price" inputmode="decimal" placeholder="150">';
+    html += '<button class="tsa-add" id="tsaAdd">Add alert</button>';
+    if (canNotify && notifState === "default") {
+      html += '<button class="tsa-quiet" id="tsaNotif">Turn on notifications</button>';
+    } else if (notifState === "denied") {
+      html += '<p class="tsa-sub">Notifications are blocked in the browser — the alarm sound and flashing screen still work.</p>';
+    }
+    if (!alerts.length) {
+      html += '<p class="tsa-sub" style="margin-top:16px">No alerts yet. Add one above.</p>';
+    }
+    alerts.forEach(function (a, i) {
+      var lp = lastPrices[a.ticker];
+      var cls = a.hit ? "tsa-row tsa-hit" : "tsa-row";
+      html += '<div class="' + cls + '">';
+      html += '<div class="tsa-line1">' + a.ticker + " " + (a.dir === "above" ? "\u25B2 above" : "\u25BC below") + " " + fmt(a.target) + "</div>";
+      if (a.hit) {
+        html += '<div class="tsa-line2"><strong>Target hit</strong> at ' + fmt(a.hitPrice) + " \u2014 " + a.hitTime + "</div>";
+      } else if (lp) {
+        var gap = a.dir === "above" ? a.target - lp.price : lp.price - a.target;
+        html += '<div class="tsa-line2">Now ' + fmt(lp.price) + (gap > 0 ? " \u2014 " + fmt(gap) + " to go" : "") + "</div>";
+        html += '<div class="tsa-line3">Checked ' + lp.t + "</div>";
+      } else {
+        html += '<div class="tsa-line2">Waiting for first price\u2026</div>';
+      }
+      html += '<button class="tsa-del" data-i="' + i + '">' + (a.hit ? "Clear" : "Delete") + "</button>";
+      html += "</div>";
+    });
+    panel.innerHTML = html;
+
+    document.getElementById("tsaAdd").addEventListener("click", addAlert);
+    var nb = document.getElementById("tsaNotif");
+    if (nb) nb.addEventListener("click", function () {
+      Notification.requestPermission().then(renderPanel);
+    });
+    Array.prototype.forEach.call(panel.querySelectorAll(".tsa-del"), function (b) {
+      b.addEventListener("click", function () {
+        alerts.splice(Number(b.getAttribute("data-i")), 1);
+        save(); renderPanel(); renderBtn();
+      });
+    });
+  }
+
+  function addAlert() {
+    var t = document.getElementById("tsaTicker").value.trim().toUpperCase();
+    var d = document.getElementById("tsaDir").value;
+    var p = parseFloat(document.getElementById("tsaTarget").value);
+    if (!t) { document.getElementById("tsaTicker").focus(); return; }
+    if (!p || p <= 0) { document.getElementById("tsaTarget").focus(); return; }
+    alerts.push({ ticker: t, dir: d, target: p, hit: false });
+    save(); renderPanel(); renderBtn();
+    live.textContent = "Alert added: " + t + " " + d + " " + fmt(p);
+  }
+
+  btn.addEventListener("click", function () {
+    panelOpen = !panelOpen;
+    panel.style.display = panelOpen ? "block" : "none";
+    if (panelOpen) renderPanel();
+    // unlock audio on a user gesture so the alarm can sound later
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === "suspended") audioCtx.resume();
+    } catch (e) {}
+  });
+
+  // ---------- alarm ----------
+  function beep() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = "square"; o.frequency.value = 880; g.gain.value = 0.3;
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + 0.35);
+    } catch (e) {}
+  }
+  function fireAlarm(a, price) {
+    a.hit = true;
+    a.hitPrice = price;
+    a.hitTime = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    save(); renderBtn(); if (panelOpen) renderPanel();
+
+    var ov = document.createElement("div");
+    ov.className = "tsa-alarm-overlay";
+    ov.setAttribute("role", "alertdialog");
+    ov.setAttribute("aria-label", "Price alert triggered");
+    ov.innerHTML =
+      '<div class="tsa-big">' + a.ticker + " hit " + fmt(a.target) + "</div>" +
+      '<div class="tsa-now">Now ' + fmt(price) + "</div>" +
+      "<button>Stop alarm</button>";
+    document.body.appendChild(ov);
+    ov.querySelector("button").addEventListener("click", function () {
+      clearInterval(alarmTimer); alarmTimer = null;
+      document.body.removeChild(ov);
+      document.title = origTitle;
+    });
+    beep();
+    if (alarmTimer) clearInterval(alarmTimer);
+    alarmTimer = setInterval(beep, 900);
+    document.title = "\uD83D\uDD14 " + a.ticker + " HIT " + fmt(a.target);
+    live.textContent = "Price alert: " + a.ticker + " reached " + fmt(a.target) + ", now " + fmt(price);
+    if ("Notification" in window && Notification.permission === "granted") {
+      try {
+        new Notification("Price alert: " + a.ticker, {
+          body: a.ticker + " is " + fmt(price) + " \u2014 target " + fmt(a.target) + " reached.",
+          requireInteraction: true
+        });
+      } catch (e) {}
+    }
+  }
+  var origTitle = document.title;
+
+  // ---------- polling ----------
+  function checkPrice(ticker, price) {
+    var t = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+    lastPrices[ticker] = { price: price, t: t };
+    alerts.forEach(function (a) {
+      if (a.hit || a.ticker !== ticker) return;
+      var crossed = a.dir === "above" ? price >= a.target : price <= a.target;
+      if (crossed) fireAlarm(a, price);
+    });
+    if (panelOpen) renderPanel();
+  }
+  function poll() {
+    var pending = alerts.filter(function (a) { return !a.hit; });
+    if (!pending.length) return;
+    var seen = {};
+    pending.forEach(function (a) {
+      if (seen[a.ticker]) return;
+      seen[a.ticker] = true;
+      var url = a.ticker === "BTC" ? PROXY + "/btc" : PROXY + "/quote?ticker=" + encodeURIComponent(a.ticker);
+      try {
+        fetch(url).then(function (r) { return r.json(); }).then(function (x) {
+          if (x && typeof x.price === "number") checkPrice(a.ticker, x.price);
+        }).catch(function () {});
+      } catch (e) {}
+    });
+  }
+  setInterval(poll, POLL_MS);
+  poll();
+  renderBtn();
+})();
+</script>
+<!-- TWOSIDES-ALERTS-ADDON END v1 -->
