@@ -6,20 +6,27 @@
   .tsa-btn-main {
     position: fixed; z-index: 99990;
     left: max(16px, env(safe-area-inset-left));
-    bottom: max(88px, calc(env(safe-area-inset-bottom) + 80px));
+    /* Default: the SAME bottom offset as the app's own "My places" pill, so the two
+       line up. JS lifts it only on a page where it would sit on another button. */
+    bottom: max(18px, calc(env(safe-area-inset-bottom) + 10px));
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    width: 62px; padding: 8px 4px 7px; box-sizing: border-box;
     font-family: 'Outfit', -apple-system, system-ui, sans-serif;
-    font-size: 20px; font-weight: 800; color: #ffffff; background: #1F2937;
-    border: 3px solid #111827; border-radius: 999px; padding: 14px 22px;
-    min-height: 56px; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+    font-weight: 800; color: #ffffff; background: #1F2937;
+    border: 3px solid #111827; border-radius: 18px;
+    cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.35);
   }
+  .tsa-btn-main .tsa-bell { position: relative; display: block; font-size: 25px; line-height: 1; }
   .tsa-btn-main .tsa-count {
-    display: inline-block; margin-left: 8px; background: #17714C; color: #fff;
-    border-radius: 999px; padding: 2px 10px; font-size: 18px;
+    position: absolute; top: -7px; right: -15px; background: #17714C; color: #fff;
+    border: 2px solid #111827; border-radius: 999px; padding: 0 6px;
+    font-size: 14px; line-height: 19px; min-width: 10px; text-align: center;
   }
+  .tsa-btn-main .tsa-cap { font-size: 14px; line-height: 1; letter-spacing: 0.2px; }
   .tsa-panel {
     position: fixed; z-index: 99991;
     left: max(12px, env(safe-area-inset-left));
-    bottom: max(156px, calc(env(safe-area-inset-bottom) + 148px));
+    bottom: 96px; /* JS keeps this just above the button */
     width: min(430px, calc(100vw - 24px)); max-height: min(72vh, 640px);
     overflow-y: auto; background: #ffffff; color: #1F2937;
     border: 3px solid #1F2937; border-radius: 18px; padding: 18px;
@@ -112,7 +119,12 @@
   }
   function renderBtn() {
     var active = alerts.filter(function (a) { return !a.hit; }).length;
-    btn.innerHTML = "\uD83D\uDD14 Alerts" + (active ? ' <span class="tsa-count">' + active + "</span>" : "");
+    btn.innerHTML =
+      '<span class="tsa-bell">\uD83D\uDD14' +
+      (active ? '<span class="tsa-count">' + active + "</span>" : "") +
+      '</span><span class="tsa-cap">Alerts</span>';
+    btn.setAttribute("aria-label",
+      "Price alerts" + (active ? " \u2014 " + active + " active" : ""));
   }
 
   function renderPanel() {
@@ -285,11 +297,44 @@
     }
     return false;
   }
+  var BASE_BOTTOM = 18;   // matches the app's own "My places" pill
+  function hitsAButton(bottomPx) {
+    var r = btn.getBoundingClientRect();
+    var h = r.height || 72, w = r.width || 62, left = r.left || 16;
+    var box = { left: left, right: left + w,
+                bottom: window.innerHeight - bottomPx,
+                top: window.innerHeight - bottomPx - h };
+    var els = document.querySelectorAll("button,a,input,select,textarea,[role=button]");
+    for (var i = 0; i < els.length; i++) {
+      var e = els[i];
+      if (e === btn || btn.contains(e) || panel.contains(e)) continue;
+      var cs;
+      try { cs = getComputedStyle(e); } catch (err) { continue; }
+      if (cs.display === "none" || cs.visibility === "hidden") continue;
+      var q = e.getBoundingClientRect();
+      if (!q.width || !q.height) continue;
+      if (!(q.right < box.left || q.left > box.right || q.bottom < box.top || q.top > box.bottom)) return true;
+    }
+    return false;
+  }
+  function placeBtn() {
+    // Sit level with "My places" when that is clear; step up only as far as needed.
+    var steps = [BASE_BOTTOM, 88, 120, 160, 200], i;
+    for (i = 0; i < steps.length; i++) {
+      if (!hitsAButton(steps[i])) break;
+    }
+    var chosen = steps[Math.min(i, steps.length - 1)];
+    btn.style.bottom = "max(" + chosen + "px, calc(env(safe-area-inset-bottom) + " + (chosen - 8) + "px))";
+    var bh = btn.getBoundingClientRect().height || 72;
+    panel.style.bottom = (chosen + bh + 12) + "px";
+  }
   function syncVisibility() {
     var hide = appOverlayUp();
     btn.style.display = hide ? "none" : "";
     if (hide && panelOpen) { panelOpen = false; panel.style.display = "none"; }
+    if (!hide) placeBtn();
   }
+  window.addEventListener("resize", function () { try { syncVisibility(); } catch (e) {} });
   setInterval(syncVisibility, 400);
   syncVisibility();
 
