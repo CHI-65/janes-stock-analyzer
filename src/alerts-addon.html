@@ -4,7 +4,9 @@
      To re-inject after a rebuild: paste this whole block before </body>. -->
 <style>
   .tsa-btn-main {
-    position: fixed; right: 16px; bottom: 16px; z-index: 99990;
+    position: fixed; z-index: 99990;
+    left: max(16px, env(safe-area-inset-left));
+    bottom: max(88px, calc(env(safe-area-inset-bottom) + 80px));
     font-family: 'Outfit', -apple-system, system-ui, sans-serif;
     font-size: 20px; font-weight: 800; color: #ffffff; background: #1F2937;
     border: 3px solid #111827; border-radius: 999px; padding: 14px 22px;
@@ -15,7 +17,9 @@
     border-radius: 999px; padding: 2px 10px; font-size: 18px;
   }
   .tsa-panel {
-    position: fixed; right: 12px; bottom: 84px; z-index: 99991;
+    position: fixed; z-index: 99991;
+    left: max(12px, env(safe-area-inset-left));
+    bottom: max(156px, calc(env(safe-area-inset-bottom) + 148px));
     width: min(430px, calc(100vw - 24px)); max-height: min(72vh, 640px);
     overflow-y: auto; background: #ffffff; color: #1F2937;
     border: 3px solid #1F2937; border-radius: 18px; padding: 18px;
@@ -258,6 +262,37 @@
       } catch (e) {}
     });
   }
+  function appOverlayUp() {
+    var vw = window.innerWidth, vh = window.innerHeight, i, e, r, cs, els;
+    els = document.body.children;
+    for (i = 0; i < els.length; i++) {
+      e = els[i];
+      if (e === btn || e === panel || e === live) continue;
+      if (e.className && String(e.className).indexOf("tsa-") === 0) continue;
+      try { cs = getComputedStyle(e); } catch (err) { continue; }
+      if (cs.display === "none" || cs.visibility === "hidden") continue;
+      r = e.getBoundingClientRect();
+      if (r.width * r.height > vw * vh * 0.55 && cs.position === "fixed") return true;
+      if (e.querySelector) {
+        var inner = e.querySelectorAll("*"), j;
+        for (j = 0; j < inner.length; j++) {
+          try { var c2 = getComputedStyle(inner[j]); } catch (err2) { continue; }
+          if (c2.position !== "fixed" || c2.display === "none" || c2.visibility === "hidden") continue;
+          var r2 = inner[j].getBoundingClientRect();
+          if (r2.width * r2.height > vw * vh * 0.55) return true;
+        }
+      }
+    }
+    return false;
+  }
+  function syncVisibility() {
+    var hide = appOverlayUp();
+    btn.style.display = hide ? "none" : "";
+    if (hide && panelOpen) { panelOpen = false; panel.style.display = "none"; }
+  }
+  setInterval(syncVisibility, 400);
+  syncVisibility();
+
   setInterval(poll, POLL_MS);
   poll();
   renderBtn();
