@@ -1,7 +1,9 @@
-<!-- TWOSIDES-ALERTS-ADDON BEGIN v1
+<!-- TWOSIDES-ALERTS-ADDON BEGIN v2
      Self-contained price-alert feature. Appended after the main app; touches
      nothing in the bundle. To remove: delete from BEGIN to END marker.
-     To re-inject after a rebuild: paste this whole block before </body>. -->
+     To re-inject after a rebuild: paste this whole block before </body>.
+     v2: form and alert list render separately - live price updates no longer
+     wipe in-progress typing (v1 bug). -->
 <style>
   .tsa-btn-main {
     position: fixed; z-index: 99990;
@@ -126,7 +128,14 @@
       "Price alerts" + (active ? " \u2014 " + active + " active" : ""));
   }
 
-  function renderPanel() {
+  var formBuilt = false;
+  function buildShell() {
+    if (formBuilt) return;
+    panel.innerHTML = '<div id="tsaFormWrap"></div><div id="tsaListWrap"></div>';
+    renderForm();
+    formBuilt = true;
+  }
+  function renderForm() {
     var canNotify = ("Notification" in window);
     var notifState = canNotify ? Notification.permission : "unsupported";
     var html = "";
@@ -144,6 +153,17 @@
     } else if (notifState === "denied") {
       html += '<p class="tsa-sub">Notifications are blocked in the browser — the alarm sound and flashing screen still work.</p>';
     }
+    document.getElementById("tsaFormWrap").innerHTML = html;
+    document.getElementById("tsaAdd").addEventListener("click", addAlert);
+    var nb = document.getElementById("tsaNotif");
+    if (nb) nb.addEventListener("click", function () {
+      Notification.requestPermission().then(renderForm);
+    });
+  }
+  function renderList() {
+    var wrap = document.getElementById("tsaListWrap");
+    if (!wrap) return;
+    var html = "";
     if (!alerts.length) {
       html += '<p class="tsa-sub" style="margin-top:16px">No alerts yet. Add one above.</p>';
     }
@@ -164,21 +184,14 @@
       html += '<button class="tsa-del" data-i="' + i + '">' + (a.hit ? "Clear" : "Delete") + "</button>";
       html += "</div>";
     });
-    panel.innerHTML = html;
-
-    document.getElementById("tsaAdd").addEventListener("click", addAlert);
-    var nb = document.getElementById("tsaNotif");
-    if (nb) nb.addEventListener("click", function () {
-      Notification.requestPermission().then(renderPanel);
-    });
-    Array.prototype.forEach.call(panel.querySelectorAll(".tsa-del"), function (b) {
+    wrap.innerHTML = html;
+    Array.prototype.forEach.call(wrap.querySelectorAll(".tsa-del"), function (b) {
       b.addEventListener("click", function () {
         alerts.splice(Number(b.getAttribute("data-i")), 1);
-        save(); renderPanel(); renderBtn();
+        save(); renderList(); renderBtn();
       });
     });
   }
-
   function addAlert() {
     var t = document.getElementById("tsaTicker").value.trim().toUpperCase();
     var d = document.getElementById("tsaDir").value;
@@ -186,14 +199,17 @@
     if (!t) { document.getElementById("tsaTicker").focus(); return; }
     if (!p || p <= 0) { document.getElementById("tsaTarget").focus(); return; }
     alerts.push({ ticker: t, dir: d, target: p, hit: false });
-    save(); renderPanel(); renderBtn();
+    save(); renderList(); renderBtn();
+    document.getElementById("tsaTicker").value = "";
+    document.getElementById("tsaTarget").value = "";
+    document.getElementById("tsaTicker").focus();
     live.textContent = "Alert added: " + t + " " + d + " " + fmt(p);
   }
 
   btn.addEventListener("click", function () {
     panelOpen = !panelOpen;
     panel.style.display = panelOpen ? "block" : "none";
-    if (panelOpen) renderPanel();
+    if (panelOpen) { buildShell(); renderList(); }
     // unlock audio on a user gesture so the alarm can sound later
     try {
       if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -215,7 +231,7 @@
     a.hit = true;
     a.hitPrice = price;
     a.hitTime = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-    save(); renderBtn(); if (panelOpen) renderPanel();
+    save(); renderBtn(); if (panelOpen) renderList();
 
     var ov = document.createElement("div");
     ov.className = "tsa-alarm-overlay";
@@ -256,7 +272,7 @@
       var crossed = a.dir === "above" ? price >= a.target : price <= a.target;
       if (crossed) fireAlarm(a, price);
     });
-    if (panelOpen) renderPanel();
+    if (panelOpen) renderList();
   }
   function poll() {
     var pending = alerts.filter(function (a) { return !a.hit; });
@@ -275,6 +291,10 @@
   }
   function appOverlayUp() {
     var vw = window.innerWidth, vh = window.innerHeight, i, e, r, cs, els;
+    // A hidden or backgrounded tab can report a 0x0 viewport. Without this guard the
+    // "covers >55% of the screen" test becomes "covers >0", every fixed element matches,
+    // and the button hides itself. Found on 2026-09-03 while testing v2.
+    if (!vw || !vh) return false;
     els = document.body.children;
     for (i = 0; i < els.length; i++) {
       e = els[i];
@@ -298,6 +318,7 @@
   }
   var BASE_BOTTOM = 18;   // matches the app's own "My places" pill
   function hitsAButton(bottomPx) {
+    if (!window.innerWidth || !window.innerHeight) return false;
     var r = btn.getBoundingClientRect();
     var h = r.height || 72, w = r.width || 62, left = r.left || 16;
     var box = { left: left, right: left + w,
@@ -332,6 +353,7 @@
     }
   }
   function placeBtn() {
+    if (!window.innerWidth || !window.innerHeight) return;
     matchMyPlacesHeight();
     // Sit level with "My places" when that is clear; step up only as far as needed.
     var steps = [BASE_BOTTOM, 88, 120, 160, 200], i;
@@ -358,4 +380,4 @@
   renderBtn();
 })();
 </script>
-<!-- TWOSIDES-ALERTS-ADDON END v1 -->
+<!-- TWOSIDES-ALERTS-ADDON END v2 -->
